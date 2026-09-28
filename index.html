@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Egg0limpiadas Control Room</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <div class="brutal-container">
+    <header class="brutal-box header-box">
+      <h1>🥚 Egg0limpiadas Control Room V16</h1>
+      <p>Switcher de Producción Independiente para OBS</p>
+    </header>
+
+    <div class="main-grid">
+      <!-- Panel de Escenas & Preview -->
+      <section class="brutal-box">
+        <h2>Escenas Internas</h2>
+        <div id="scenes-list" class="scene-buttons">
+          <button class="brutal-btn" onclick="selectScene('INTRO')">INTRO</button>
+          <button class="brutal-btn" onclick="selectScene('CAMARA')">CAMARA</button>
+          <button class="brutal-btn" onclick="selectScene('JUEGO')">JUEGO</button>
+          <button class="brutal-btn" onclick="selectScene('PARTICIPANTES')">PARTICIPANTES</button>
+          <button class="brutal-btn" onclick="selectScene('BRB')">BRB</button>
+          <button class="brutal-btn" onclick="selectScene('FINAL')">FINAL</button>
+        </div>
+        
+        <div class="action-zone" style="margin-top: 20px;">
+          <button class="brutal-btn btn-go" onclick="sendToProgram()">🚀 ENVIAR AL AIRE (PROGRAM)</button>
+        </div>
+      </section>
+
+      <!-- Estado en vivo -->
+      <section class="brutal-box status-box">
+        <h2>Estado Actual</h2>
+        <div id="current-status" style="font-size: 1.2rem; color: #ffee00; font-weight: bold;">
+          Cargando estado...
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
