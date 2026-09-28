@@ -1,0 +1,16 @@
+{
+  "name": "sreggo-control-room",
+  "version": "16.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "obs-websocket-js": "latest"
+  }
+}
