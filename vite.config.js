@@ -40,4 +40,12 @@ function controlRoomApi(){return {name:'control-room-api',configureServer(server
  }
  next();
 });}}}
-export default defineConfig({server:{host:'0.0.0.0',port:5173,strictPort:true},plugins:[controlRoomApi()]});
+export default defineConfig({
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
+    allowedHosts: ['eggo-control-room.onrender.com']
+  },
+  plugins: [controlRoomApi()]
+});
