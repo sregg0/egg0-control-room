@@ -3,8 +3,111 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Egg0limpiadas Control Room</title>
-  <link rel="stylesheet" href="/src/styles.css">
+  <title>Egg0limpiadas Control Room V16</title>
+  <style>
+    :root {
+      --bg-deep: #0a0a0a;
+      --panel-bg: #141414;
+      --pink-primary: #ff007f;
+      --yellow-highlight: #ffee00;
+      --text-main: #ffffff;
+      --border-strong: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      background-color: var(--bg-deep);
+      color: var(--text-main);
+      font-family: 'Courier New', Courier, monospace, system-ui;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .brutal-container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .brutal-box {
+      background-color: var(--panel-bg);
+      border: 4px solid var(--border-strong);
+      box-shadow: 6px 6px 0px var(--pink-primary);
+      padding: 25px;
+      margin-bottom: 25px;
+    }
+
+    .header-box {
+      text-align: center;
+      border-bottom: 4px solid var(--pink-primary);
+      box-shadow: 6px 6px 0px var(--yellow-highlight);
+    }
+
+    h1, h2 {
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-top: 0;
+    }
+
+    .scene-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .brutal-btn {
+      background-color: var(--panel-bg);
+      color: var(--text-main);
+      font-weight: 900;
+      border: 3px solid var(--border-strong);
+      padding: 15px;
+      box-shadow: 4px 4px 0px var(--pink-primary);
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: transform 0.1s ease, box-shadow 0.1s ease, background-color 0.1s ease;
+      font-size: 1rem;
+    }
+
+    .brutal-btn:hover {
+      background-color: var(--pink-primary);
+      color: #000000;
+    }
+
+    .brutal-btn.active {
+      background-color: var(--yellow-highlight);
+      color: #000000;
+      box-shadow: 4px 4px 0px var(--border-strong);
+    }
+
+    .btn-go {
+      background-color: var(--yellow-highlight);
+      color: #000000;
+      width: 100%;
+      font-size: 1.2rem;
+      padding: 20px;
+      box-shadow: 6px 6px 0px var(--border-strong);
+      margin-top: 10px;
+    }
+
+    .btn-go:hover {
+      background-color: var(--pink-primary);
+      color: #ffffff;
+    }
+
+    .status-display {
+      font-size: 1.4rem;
+      color: var(--yellow-highlight);
+      font-weight: bold;
+      background: #000;
+      padding: 15px;
+      border: 2px dashed var(--yellow-highlight);
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
   <div class="brutal-container">
@@ -13,34 +116,66 @@
       <p>Switcher de Producción Independiente para OBS</p>
     </header>
 
-    <div class="main-grid">
-      <!-- Panel de Escenas & Preview -->
-      <section class="brutal-box">
-        <h2>Escenas Internas</h2>
-        <div id="scenes-list" class="scene-buttons">
-          <button class="brutal-btn" onclick="selectScene('INTRO')">INTRO</button>
-          <button class="brutal-btn" onclick="selectScene('CAMARA')">CAMARA</button>
-          <button class="brutal-btn" onclick="selectScene('JUEGO')">JUEGO</button>
-          <button class="brutal-btn" onclick="selectScene('PARTICIPANTES')">PARTICIPANTES</button>
-          <button class="brutal-btn" onclick="selectScene('BRB')">BRB</button>
-          <button class="brutal-btn" onclick="selectScene('FINAL')">FINAL</button>
-        </div>
-        
-        <div class="action-zone" style="margin-top: 20px;">
-          <button class="brutal-btn btn-go" onclick="sendToProgram()">🚀 ENVIAR AL AIRE (PROGRAM)</button>
-        </div>
-      </section>
+    <div class="brutal-box">
+      <h2>Seleccionar Escena (Preview)</h2>
+      <div class="scene-grid" id="scene-buttons">
+        <button class="brutal-btn active" onclick="setPreview('INTRO')">INTRO</button>
+        <button class="brutal-btn" onclick="setPreview('CAMARA')">CAMARA</button>
+        <button class="brutal-btn" onclick="setPreview('JUEGO')">JUEGO</button>
+        <button class="brutal-btn" onclick="setPreview('PARTICIPANTES')">PARTICIPANTES</button>
+        <button class="brutal-btn" onclick="setPreview('BRB')">BRB</button>
+        <button class="brutal-btn" onclick="setPreview('FINAL')">FINAL</button>
+      </div>
+    </div>
 
-      <!-- Estado en vivo -->
-      <section class="brutal-box status-box">
-        <h2>Estado Actual</h2>
-        <div id="current-status" style="font-size: 1.2rem; color: #ffee00; font-weight: bold;">
-          Cargando estado...
-        </div>
-      </section>
+    <div class="brutal-box">
+      <h2>Acción de Mando</h2>
+      <button class="brutal-btn btn-go" onclick="sendToProgram()">🚀 ENVIAR AL AIRE (PROGRAM)</button>
+      <p style="margin-top: 20px; margin-bottom: 10px; text-transform: uppercase; font-weight: bold;">Estado al Aire:</p>
+      <div id="current-status" class="status-display">Sincronizando...</div>
     </div>
   </div>
 
-  <script type="module" src="/src/main.jsx"></script>
+  <script>
+    let selectedScene = 'INTRO';
+
+    function setPreview(scene) {
+      selectedScene = scene;
+      document.querySelectorAll('.scene-grid button').forEach(btn => {
+        if (btn.innerText === scene) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    }
+
+    async function sendToProgram() {
+      try {
+        const res = await fetch('/api/program', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sceneName: selectedScene, layers: [], participants: [] })
+        });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('current-status').innerText = "¡AL AIRE: " + data.currentProgram.sceneName + "!";
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/program');
+        const data = await res.json();
+        document.getElementById('current-status').innerText = "AL AIRE ACTUAL: " + data.sceneName;
+      } catch (e) {}
+    }
+
+    setInterval(fetchStatus, 1000);
+    fetchStatus();
+  </script>
 </body>
 </html>
