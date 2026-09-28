@@ -37,7 +37,12 @@ function safeName(name = 'asset') {
 }
 const mime = { '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.svg':'image/svg+xml','.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime','.m4v':'video/x-m4v' };
 
-const vite = await createViteServer({ configFile:false, root:__dirname, server:{ middlewareMode:true }, appType:'spa' });
+const vite = await createViteServer({ 
+  server: { 
+    middlewareMode: true,
+    allowedHosts: true
+  } 
+});
 
 const server = http.createServer((req, res) => {
   let u;
