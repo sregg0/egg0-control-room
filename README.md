@@ -1,26 +1,28 @@
-# SREGGO Control Room V16 — Paso 1 (Render)
+# SREGGO Control Room V17 — versión de revisión
 
-**Panel web:** https://egg0-control-room.onrender.com/  
-**Salida para fuente de navegador de OBS:** https://egg0-control-room.onrender.com/output  
-**Tamaño en OBS:** 1920 × 1080
+Panel React + Vite con Node.js, para Render y salida OBS Browser Source (`/output`).
 
-La pantalla del panel calcula automáticamente la URL de Output usando el dominio donde está abierta. El servidor utiliza `process.env.PORT` en Render (con 5173 como valor predeterminado local).
+## Funcionalidades incluidas en esta entrega
+- Menú Perfiles y escenas dentro de cada perfil; duplicación, cambio de orden, renombrado y borrado.
+- Participantes independientes por escena, límite 10, posicionamiento XY y VDO.Ninja.
+- Pizarra individual por participante, enlace de edición único (`/pizarra/<id>?token=...`).
+- Alternar cámara/pizarra individualmente o todos los participantes visibles de la escena.
+- Cuando una escena está al aire en `/output`, cambiar cámara/pizarra modifica también la salida activa sin reenviar la escena.
+- Dibujos en tiempo casi real mediante polling; se conservan al ocultar pizarra.
+- Estado compartido entre navegadores por `/api/studio` y almacenamiento JSON en servidor; sincronización por sondeo.
+- Migración inicial desde escenas V16 guardadas en el navegador (`v8Scenes`).
 
-## Publicar en Render
+## IMPORTANTE ANTES DE PUBLICAR
+1. **No desplegar aún para un evento público** sin proteger las rutas `/api/studio`, `/api/program`, `/api/program/mode`, `/api/preload`, `/api/upload` y los enlaces de pizarra con autenticación efectiva. Esta base no trae gestión de permisos del staff ni protección de dichas rutas. El bloqueo de una página web no equivale a proteger una API.
+2. Render puede usar un **disco efímero**: los archivos `.studio-state.json`, `.board-state.json`, `.program-state.json` y `uploads/` pueden perderse con reinicios/despliegues. Para producción hay que pasar el estado y assets a almacenamiento persistente (por ejemplo, Postgres y object storage).
+3. El OBS en tu PC **no se controla remotamente todavía**. Las escenas se muestran con Browser Source en `https://egg0-control-room.onrender.com/output`, sin crear escenas de OBS. La conexión WebSocket desde el panel sigue siendo local al navegador y no funciona para el staff remoto.
+4. Los cambios del editor se envían al servidor automáticamente. En ediciones simultáneas todavía pueden ocurrir conflictos (última escritura gana). Se requiere endurecer sincronización antes del evento.
+5. El enlace de pizarra permite editar; compártelo solo con la persona correspondiente. La visualización de la pizarra es pública dentro de la salida OBS.
 
-Sube los archivos a la rama `main` del repositorio conectado a Render. Mantén la configuración actual del servicio si ya funciona con `npm run dev`.
+## Desarrollo y pruebas
+`npm install`
+`npm run dev`
+Abrir `http://localhost:5173`; salida `http://localhost:5173/output`.
 
-## OBS (tu PC)
-
-En OBS, añade una **Fuente de navegador** apuntando a `https://egg0-control-room.onrender.com/output`, con ancho `1920` y alto `1080`.
-
-**Importante:** este paso NO conecta el OBS local de forma remota al personal del staff. La opción OBS WebSocket `ws://127.0.0.1:4455` solo sirve desde el navegador ejecutado en la misma computadora de OBS (y puede estar bloqueada por las restricciones de seguridad de un sitio HTTPS). El puente remoto se implementará en un paso posterior.
-
-## Ejecutar localmente (solo pruebas)
-
-```powershell
-npm install
-npm run dev
-```
-
-El estado de escenas todavía se guarda en localStorage por navegador, y el backend conserva estado y archivos en disco efímero. Estos puntos requieren los siguientes pasos antes de depender del sistema para producción.
+## Publicación
+Antes de cambiar la rama `main`, probar esta versión en una rama nueva / servicio de staging. Hacer copia de seguridad del repositorio y del estado de producción. La integración con el sistema de acceso ya existente debe revisarse por separado.

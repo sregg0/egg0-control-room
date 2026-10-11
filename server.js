@@ -9,6 +9,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.join(__dirname, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 const stateFile = path.join(__dirname, '.program-state.json');
+const studioFile = path.join(__dirname, '.studio-state.json');
+const boardsFile = path.join(__dirname, '.board-state.json');
+const readJSON=(f,defaultValue)=>{try{return JSON.parse(fs.readFileSync(f,'utf8'))}catch{return defaultValue}};
+const saveJSON=(f,value)=>{try{fs.writeFileSync(f,JSON.stringify(value));return true}catch(e){console.error('No se pudo guardar',f,e.message);return false}};
+let studio=readJSON(studioFile,{profiles:[],version:0});
+let boards=readJSON(boardsFile,{});
+function bodyJSON(req,res,cb,max=2*1024*1024){let body='',large=false;req.setEncoding('utf8');req.on('data',c=>{body+=c;if(body.length>max)large=true});req.on('end',()=>{if(large)return json(res,413,{error:'Solicitud demasiado grande'});try{cb(JSON.parse(body||'{}'))}catch(e){json(res,400,{error:e.message})}})}
+function findBoard(id){for(const p of studio.profiles||[])for(const s of p.scenes||[])for(const g of s.guests||[])if(g.boardId===id)return g;return null}
 const DEFAULT = { scene: null, fadeMs: 350, version: 0 };
 let program = { ...DEFAULT };
 let preload = { scenes: [], version: 0 };
@@ -58,7 +66,31 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
-  if (pathname === '/api/health') return json(res, 200, { ok:true, version:16, mode:'persistent-output', programVersion:program.version || 0, preloadVersion:preload.version || 0 });
+  if(pathname==='/api/studio'&&req.method==='GET')return json(res,200,studio);
+  if(pathname==='/api/studio'&&req.method==='PUT')return bodyJSON(req,res,next=>{
+    if(!Array.isArray(next.profiles)||next.profiles.length>100)return json(res,400,{error:'Perfiles inválidos'});
+    for(const p of next.profiles){if(!Array.isArray(p.scenes)||p.scenes.length>250)return json(res,400,{error:'Escenas inválidas'});for(const scene of p.scenes)if(!Array.isArray(scene.guests)||scene.guests.length>10)return json(res,400,{error:'Máximo 10 participantes por escena'})}
+    studio={profiles:next.profiles,version:Date.now()};saveJSON(studioFile,studio);return json(res,200,{ok:true,version:studio.version})
+  },12*1024*1024);
+  if(pathname.startsWith('/api/board/')){
+    const id=pathname.slice('/api/board/'.length);
+    if(!/^[a-zA-Z0-9_-]{8,80}$/.test(id))return json(res,400,{error:'Pizarra inválida'});
+    const participant=findBoard(id);
+    if(!participant)return json(res,404,{error:'Pizarra no encontrada'});
+    const editor=u.searchParams.get('token')===participant.boardToken&&!!participant.boardToken;
+    if(req.method==='GET')return json(res,200,{strokes:boards[id]||[],editable:editor});
+    if(req.method==='PUT'){
+      if(!editor)return json(res,403,{error:'Enlace de edición inválido'});
+      return bodyJSON(req,res,next=>{
+        if(!Array.isArray(next.strokes)||next.strokes.length>2000)return json(res,400,{error:'Demasiados trazos'});
+        if(JSON.stringify(next.strokes).length>1024*1024)return json(res,413,{error:'Pizarra demasiado grande'});
+        boards[id]=next.strokes;saveJSON(boardsFile,boards);return json(res,200,{ok:true,strokes:boards[id]})
+      });
+    }
+    return json(res,405,{error:'Método no permitido'});
+  }
+
+  if (pathname === '/api/health') return json(res, 200, { ok:true, version:17, mode:'persistent-output', programVersion:program.version || 0, preloadVersion:preload.version || 0 });
 
 
   if (pathname === '/api/preload' && req.method === 'GET') {
@@ -80,6 +112,15 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+
+  if(pathname==='/api/program/mode'&&req.method==='POST')return bodyJSON(req,res,next=>{
+    if(!['camera','board'].includes(next.mode))return json(res,400,{error:'Modo inválido'});
+    if(program.scene?.id!==next.sceneId)return json(res,200,{ok:true,updated:false});
+    const guest=(program.scene.guests||[]).find(g=>String(g.id)===String(next.guestId));
+    if(!guest)return json(res,404,{error:'Participante no encontrado'});
+    guest.mode=next.mode;program.version=Date.now();saveJSON(stateFile,program);
+    return json(res,200,{ok:true,updated:true,version:program.version});
+  });
 
   if (pathname === '/api/program' && req.method === 'GET') {
     return json(res, 200, program);
@@ -106,11 +147,11 @@ const server = http.createServer((req, res) => {
         };
         // Persistir es útil, pero NUNCA debe impedir mandar al aire.
         try { fs.writeFileSync(stateFile, JSON.stringify(program)); }
-        catch (e) { console.warn('[V16] No se pudo guardar .program-state.json:', e.message); }
-        console.log(`[V16] AL AIRE -> ${program.scene?.name || 'SIN ESCENA'} | version ${program.version}`);
+        catch (e) { console.warn('[V17] No se pudo guardar .program-state.json:', e.message); }
+        console.log(`[V17] AL AIRE -> ${program.scene?.name || 'SIN ESCENA'} | version ${program.version}`);
         return json(res, 200, { ok:true, version:program.version, sceneName:program.scene?.name || null });
       } catch (e) {
-        console.error('[V16] Error publicando:', e);
+        console.error('[V17] Error publicando:', e);
         return json(res, 400, { ok:false, error:e?.message || 'JSON inválido' });
       }
     });
@@ -160,4 +201,4 @@ const server = http.createServer((req, res) => {
 });
 
 const PORT = Number(process.env.PORT) || 5173;
-server.listen(PORT, '0.0.0.0', () => console.log(`SREGGO Control Room V16 escuchando en puerto ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`SREGGO Control Room V17 escuchando en puerto ${PORT}`));
