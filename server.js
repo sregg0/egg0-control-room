@@ -40,7 +40,7 @@ const mime = { '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.web
 const vite = await createViteServer({ 
   server: { 
     middlewareMode: true,
-    allowedHosts: true
+    allowedHosts: ['egg0-control-room.onrender.com', 'localhost', '127.0.0.1']
   } 
 });
 
@@ -159,5 +159,5 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const PORT = 5173;
-server.listen(PORT, '0.0.0.0', () => console.log(`\nSREGGO Control Room V16\nPanel:  http://localhost:${PORT}/\nOutput: http://localhost:${PORT}/output\nCarpeta: obs-control-panel\n`));
+const PORT = Number(process.env.PORT) || 5173;
+server.listen(PORT, '0.0.0.0', () => console.log(`SREGGO Control Room V16 escuchando en puerto ${PORT}`));
