@@ -14,7 +14,18 @@ const boardsFile = path.join(__dirname, '.board-state.json');
 const readJSON=(f,defaultValue)=>{try{return JSON.parse(fs.readFileSync(f,'utf8'))}catch{return defaultValue}};
 const saveJSON=(f,value)=>{try{fs.writeFileSync(f,JSON.stringify(value));return true}catch(e){console.error('No se pudo guardar',f,e.message);return false}};
 let studio=readJSON(studioFile,{profiles:[],version:0});
+let selection={profileId:'',sceneId:'',version:0};
 let boards=readJSON(boardsFile,{});
+// Real-time ephemeral pen strokes; completed strokes still persist through PUT.
+const liveBoards = new Map();
+const boardStreams = new Map();
+function broadcastBoard(id, event) {
+  const clients = boardStreams.get(id);
+  if (!clients) return;
+  const payload = `data: ${JSON.stringify(event)}\n\n`;
+  for (const res of clients) { try { res.write(payload); } catch { clients.delete(res); } }
+}
+
 function bodyJSON(req,res,cb,max=2*1024*1024){let body='',large=false;req.setEncoding('utf8');req.on('data',c=>{body+=c;if(body.length>max)large=true});req.on('end',()=>{if(large)return json(res,413,{error:'Solicitud demasiado grande'});try{cb(JSON.parse(body||'{}'))}catch(e){json(res,400,{error:e.message})}})}
 function findBoard(id){for(const p of studio.profiles||[])for(const s of p.scenes||[])for(const g of s.guests||[])if(g.boardId===id)return g;return null}
 const DEFAULT = { scene: null, fadeMs: 350, version: 0 };
@@ -66,12 +77,46 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
+  // Shared editor selection (preview only). This endpoint never changes the program output.
+  if(pathname==='/api/selection'&&req.method==='GET')return json(res,200,selection);
+  if(pathname==='/api/selection'&&req.method==='PUT')return bodyJSON(req,res,next=>{
+    if(typeof next.profileId!=='string'||typeof next.sceneId!=='string')return json(res,400,{error:'Selección inválida'});
+    const chosen=studio.profiles.find(p=>p.id===next.profileId);
+    if(studio.profiles.length && (!chosen || (next.sceneId&&!chosen.scenes.some(s=>s.id===next.sceneId))))return json(res,409,{error:'Perfil o escena desconocidos'});
+    selection={profileId:next.profileId,sceneId:next.sceneId,version:Date.now()};
+    return json(res,200,{ok:true,...selection});
+  });
   if(pathname==='/api/studio'&&req.method==='GET')return json(res,200,studio);
   if(pathname==='/api/studio'&&req.method==='PUT')return bodyJSON(req,res,next=>{
     if(!Array.isArray(next.profiles)||next.profiles.length>100)return json(res,400,{error:'Perfiles inválidos'});
     for(const p of next.profiles){if(!Array.isArray(p.scenes)||p.scenes.length>250)return json(res,400,{error:'Escenas inválidas'});for(const scene of p.scenes)if(!Array.isArray(scene.guests)||scene.guests.length>10)return json(res,400,{error:'Máximo 10 participantes por escena'})}
     studio={profiles:next.profiles,version:Date.now()};saveJSON(studioFile,studio);return json(res,200,{ok:true,version:studio.version})
   },12*1024*1024);
+  if(pathname.startsWith('/api/board-stream/') && req.method==='GET'){
+    const id=pathname.slice('/api/board-stream/'.length);
+    if(!/^[a-zA-Z0-9_-]{8,80}$/.test(id)||!findBoard(id))return json(res,404,{error:'Pizarra no encontrada'});
+    res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','Connection':'keep-alive','X-Accel-Buffering':'no'});
+    res.write(`data: ${JSON.stringify({type:'snapshot',strokes:boards[id]||[],working:liveBoards.get(id)||null})}\n\n`);
+    if(!boardStreams.has(id))boardStreams.set(id,new Set());
+    const clients=boardStreams.get(id);clients.add(res);
+    const heartbeat=setInterval(()=>{try{res.write(': keepalive\n\n')}catch{}},20000);
+    req.on('close',()=>{clearInterval(heartbeat);clients.delete(res);if(!clients.size)boardStreams.delete(id)});
+    return;
+  }
+  if(pathname.startsWith('/api/board-live/') && req.method==='POST'){
+    const id=pathname.slice('/api/board-live/'.length);
+    if(!/^[a-zA-Z0-9_-]{8,80}$/.test(id))return json(res,400,{error:'Pizarra inválida'});
+    const participant=findBoard(id);
+    if(!participant)return json(res,404,{error:'Pizarra no encontrada'});
+    if(!participant.boardToken||u.searchParams.get('token')!==participant.boardToken)return json(res,403,{error:'Enlace inválido'});
+    return bodyJSON(req,res,next=>{
+      const line=next.working;
+      if(line!==null&&(!line||!Array.isArray(line.points)||line.points.length>5000||JSON.stringify(line).length>90000))return json(res,400,{error:'Trazo inválido'});
+      if(line===null)liveBoards.delete(id);else liveBoards.set(id,line);
+      broadcastBoard(id,{type:'working',working:line});
+      return json(res,200,{ok:true});
+    },100000);
+  }
   if(pathname.startsWith('/api/board/')){
     const id=pathname.slice('/api/board/'.length);
     if(!/^[a-zA-Z0-9_-]{8,80}$/.test(id))return json(res,400,{error:'Pizarra inválida'});
@@ -84,7 +129,7 @@ const server = http.createServer((req, res) => {
       return bodyJSON(req,res,next=>{
         if(!Array.isArray(next.strokes)||next.strokes.length>2000)return json(res,400,{error:'Demasiados trazos'});
         if(JSON.stringify(next.strokes).length>1024*1024)return json(res,413,{error:'Pizarra demasiado grande'});
-        boards[id]=next.strokes;saveJSON(boardsFile,boards);return json(res,200,{ok:true,strokes:boards[id]})
+        boards[id]=next.strokes;liveBoards.delete(id);saveJSON(boardsFile,boards);broadcastBoard(id,{type:'saved',strokes:boards[id],working:null});return json(res,200,{ok:true,strokes:boards[id]})
       });
     }
     return json(res,405,{error:'Método no permitido'});

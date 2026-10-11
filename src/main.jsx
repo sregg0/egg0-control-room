@@ -114,20 +114,32 @@ function BoardCanvas({strokes,working,background='#ffffff'}){
  useEffect(()=>{const c=ref.current;if(!c)return;const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle=background;ctx.fillRect(0,0,c.width,c.height);for(const line of [...strokes,...(working?[working]:[])]){const pts=line.points||[];if(!pts.length)continue;ctx.strokeStyle=line.color||'#111';ctx.fillStyle=line.color||'#111';ctx.lineWidth=line.size||4;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(const point of pts.slice(1))ctx.lineTo(point[0],point[1]);if(pts.length===1){ctx.arc(pts[0][0],pts[0][1],Math.max(1,ctx.lineWidth/2),0,Math.PI*2);ctx.fill()}else ctx.stroke()}},[strokes,working,background]);return <canvas ref={ref} width="1280" height="720" className="board-canvas"/>;
 }
 function BoardViewer({boardId}){
- const [strokes,setStrokes]=useState([]);
- useEffect(()=>{if(!boardId)return;let stop=false;const refresh=async()=>{try{const r=await fetch(`/api/board/${encodeURIComponent(boardId)}`,{cache:'no-store'});if(r.ok){const b=await r.json();if(!stop)setStrokes(b.strokes||[])}}catch{}};refresh();const t=setInterval(refresh,300);return()=>{stop=true;clearInterval(t)}},[boardId]);return <BoardCanvas strokes={strokes}/>;
+ const [strokes,setStrokes]=useState([]),[working,setWorking]=useState(null);
+ useEffect(()=>{
+  if(!boardId)return;
+  let stopped=false;
+  const refresh=async()=>{try{const r=await fetch(`/api/board/${encodeURIComponent(boardId)}`,{cache:'no-store'});if(r.ok){const b=await r.json();if(!stopped)setStrokes(b.strokes||[])}}catch{}};
+  refresh();
+  const stream=new EventSource(`/api/board-stream/${encodeURIComponent(boardId)}`);
+  stream.onmessage=e=>{try{const update=JSON.parse(e.data);if(stopped)return;if(update.type==='snapshot'||update.type==='saved')setStrokes(update.strokes||[]);if('working' in update)setWorking(update.working)}catch{}};
+  // Fallback for temporary disconnects and older deployments.
+  const poll=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1000);
+  return()=>{stopped=true;stream.close();clearInterval(poll)};
+ },[boardId]);
+ return <BoardCanvas strokes={strokes} working={working}/>;
 }
 function BoardPage(){
  const id=location.pathname.split('/')[2],token=new URLSearchParams(location.search).get('token')||'';
  const [strokes,setStrokes]=useState([]),[working,setWorking]=useState(null),[color,setColor]=useState('#161616'),[size,setSize]=useState(5),[error,setError]=useState('');
- const frame=useRef(null),workingRef=useRef(null),strokesRef=useRef([]);
+ const frame=useRef(null),workingRef=useRef(null),strokesRef=useRef([]),lastLiveRef=useRef(0);
  const fetchBoard=async()=>{const r=await fetch(`/api/board/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,{cache:'no-store'});if(!r.ok)throw Error('Enlace inválido o caducado');const b=await r.json();strokesRef.current=b.strokes||[];setStrokes(strokesRef.current)};
  useEffect(()=>{let active=true;const poll=async()=>{try{await fetchBoard();if(active)setError('')}catch(e){if(active)setError(e.message)}};poll();const t=setInterval(()=>{if(!workingRef.current)poll()},900);return()=>{active=false;clearInterval(t)}},[id,token]);
  const point=e=>{const rect=frame.current.getBoundingClientRect();return [Math.round((e.clientX-rect.left)/rect.width*1280),Math.round((e.clientY-rect.top)/rect.height*720)]};
- const down=e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);const line={color,size,points:[point(e)]};workingRef.current=line;setWorking(line)};
- const move=e=>{if(!workingRef.current)return;const line={...workingRef.current,points:[...workingRef.current.points,point(e)]};workingRef.current=line;setWorking(line)};
+ const sendLive=line=>{fetch(`/api/board-live/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({working:line}),keepalive:false}).catch(()=>{});};
+ const down=e=>{e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);const line={color,size,points:[point(e)]};workingRef.current=line;setWorking(line);sendLive(line);lastLiveRef.current=Date.now()};
+ const move=e=>{if(!workingRef.current)return;const line={...workingRef.current,points:[...workingRef.current.points,point(e)]};workingRef.current=line;setWorking(line);if(Date.now()-lastLiveRef.current>=45){lastLiveRef.current=Date.now();sendLive(line)}};
  const save=async(next)=>{const r=await fetch(`/api/board/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({strokes:next})});if(!r.ok)throw Error('No se pudo guardar la pizarra');const data=await r.json();strokesRef.current=data.strokes;setStrokes(data.strokes)};
- const up=async()=>{const line=workingRef.current;if(!line)return;workingRef.current=null;setWorking(null);try{await save([...strokesRef.current,line])}catch(e){setError(e.message)}};
+ const up=async()=>{const line=workingRef.current;if(!line)return;workingRef.current=null;setWorking(null);sendLive(line);try{await save([...strokesRef.current,line])}catch(e){setError(e.message);sendLive(null)}};
  return <div className="board-page"><header><div><div className="eyebrow">EGG0LIMPIADAS · PIZARRA EN DIRECTO</div><h1>Tu pizarra</h1></div></header><div className="board-toolbar"><label>Color <input type="color" value={color} onChange={e=>setColor(e.target.value)}/></label><label>Grosor <input type="range" min="1" max="30" value={size} onChange={e=>setSize(Number(e.target.value))}/></label><button onClick={()=>setColor('#ffffff')}>Borrador blanco</button><button onClick={()=>save(strokesRef.current.slice(0,-1)).catch(e=>setError(e.message))}>Deshacer</button><button className="danger" onClick={()=>{if(window.confirm('¿Borrar todo?'))save([]).catch(e=>setError(e.message))}}>Limpiar</button></div>{error&&<div className="notice">{error}</div>}<div ref={frame} className="board-drawing" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}><BoardCanvas strokes={strokes} working={working}/></div><p className="muted">Tus dibujos aparecen en directo cuando producción muestra tu pizarra. No cierres esta pestaña durante la actividad.</p></div>
 }
 
@@ -141,6 +153,7 @@ function App(){
  const scenes=profile?.scenes||[];
  const setScenes=fn=>updateProfiles(prev=>prev.map(p=>p.id===(profile?.id)?{...p,scenes:typeof fn==='function'?fn(p.scenes):fn}:p));
  const [selected,setSelected]=useState('');
+ const selectionReady=useRef(false), remoteSelection=useRef(false), lastSelectionVersion=useRef(0), lastSelectionEdit=useRef(0);
  const [tab,setTab]=useState('En vivo');
  const [fadeMs,setFadeMs]=useState(()=>Number(localStorage.getItem('v8FadeMs')||350));
  const [dirty,setDirty]=useState(false),[notice,setNotice]=useState(''),[sending,setSending]=useState(false),[liveName,setLiveName]=useState('—'),[bridgeOk,setBridgeOk]=useState(false);
@@ -152,6 +165,25 @@ function App(){
  const scene=scenes.find(s=>s.id===selected)||scenes[0];
 
  useEffect(()=>localStorage.setItem('v17SelectedProfile',profile?.id||''),[profile?.id]);
+ // Profile and scene selection belongs to the shared production preview, not localStorage.
+ const choose=(pid,sid)=>{lastSelectionEdit.current=Date.now();setProfileId(pid);setSelected(sid||'')};
+ useEffect(()=>{let stopped=false;const pull=async()=>{try{
+   const r=await fetch('/api/selection',{cache:'no-store'});if(!r.ok)return;
+   const d=await r.json();if(stopped)return;
+   if(d.version>lastSelectionVersion.current && Date.now()-lastSelectionEdit.current>1300){
+     lastSelectionVersion.current=d.version;
+     if(d.profileId){remoteSelection.current=true;setProfileId(d.profileId);setSelected(d.sceneId||'')}
+   }
+   selectionReady.current=true;
+ }catch{}};pull();const timer=setInterval(pull,800);return()=>{stopped=true;clearInterval(timer)}},[]);
+ useEffect(()=>{if(!selectionReady.current||!profile?.id)return;
+   if(remoteSelection.current){remoteSelection.current=false;return}
+   const timer=setTimeout(async()=>{try{
+     const r=await fetch('/api/selection',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({profileId:profile.id,sceneId:scene?.id||''})});
+     if(r.ok){const d=await r.json();lastSelectionVersion.current=d.version}
+   }catch{}},300);return()=>clearTimeout(timer)
+ },[profile?.id,scene?.id]);
+
  useEffect(()=>localStorage.setItem('v17Profiles',JSON.stringify(profiles)),[profiles]);
  useEffect(()=>{if(fromRemote.current){fromRemote.current=false;return}if(!studioReady||!profiles.length)return;const t=setTimeout(()=>fetch('/api/studio',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({profiles,version:Date.now()})}).catch(()=>{}),450);return()=>clearTimeout(t)},[profiles]);
  useEffect(()=>{let stopped=false;const pull=async()=>{try{const r=await fetch('/api/studio',{cache:'no-store'});const d=await r.json();if(stopped)return;setStudioReady(true);if(!Array.isArray(d.profiles)||!d.profiles.length)return;if(d.version>lastRemoteVersion.current&&Date.now()-lastLocalEdit.current>2500){lastRemoteVersion.current=d.version;fromRemote.current=true;setProfiles(d.profiles.map(p=>({...p,scenes:(p.scenes||[]).map(normalizeScene)})))}}catch{if(!stopped)setStudioReady(true)}};pull();const t=setInterval(pull,2200);return()=>{stopped=true;clearInterval(t)}},[]);
@@ -161,14 +193,14 @@ function App(){
  useEffect(()=>{const close=()=>{setConnected(false);setObsStatus('Desconectado')};obs.on('ConnectionClosed',close);return()=>obs.removeAllListeners()},[]);
  const say=m=>{setNotice(m);setTimeout(()=>setNotice(''),3200)};
  const patchScene=(id,p)=>{setScenes(v=>v.map(s=>s.id===id?{...s,...p}:s));setDirty(true)};
- const selectScene=id=>{setSelected(id);setTab('Perfiles')};
- const addProfile=()=>{const name=window.prompt('Nombre del perfil','Nuevo perfil');if(!name?.trim())return;const id=uid();updateProfiles(v=>[...v,{id,name:name.trim(),scenes:[mediaScene('NUEVA ESCENA',true)]}]);setProfileId(id);setSelected('');};
+ const selectScene=id=>{choose(profile.id,id);setTab('Perfiles')};
+ const addProfile=()=>{const name=window.prompt('Nombre del perfil','Nuevo perfil');if(!name?.trim())return;const id=uid();updateProfiles(v=>[...v,{id,name:name.trim(),scenes:[mediaScene('NUEVA ESCENA',true)]}]);choose(id,'');};
  const renameProfile=()=>{const name=window.prompt('Nuevo nombre',profile.name);if(name?.trim())updateProfiles(v=>v.map(p=>p.id===profile.id?{...p,name:name.trim()}:p))};
- const duplicateProfile=()=>{const id=uid();const duplicate=JSON.parse(JSON.stringify(profile));duplicate.id=id;duplicate.name+=' (copia)';duplicate.scenes=duplicate.scenes.map(s=>({...s,id:uid(),guests:s.guests.map(g=>({...g,id:uid(),boardId:uid()+uid(),boardToken:uid()+uid()+uid()}))}));updateProfiles(v=>[...v,duplicate]);setProfileId(id);setSelected('')};
- const deleteProfile=()=>{if(profiles.length===1)return say('Debes conservar un perfil');if(!window.confirm('¿Eliminar este perfil y todas sus escenas?'))return;updateProfiles(v=>v.filter(p=>p.id!==profile.id));setProfileId(profiles.find(p=>p.id!==profile.id)?.id);setSelected('')};
- const duplicateScene=()=>{if(!scene)return;const copy=JSON.parse(JSON.stringify(scene));copy.id=uid();copy.name+=' (copia)';copy.guests=copy.guests.map(g=>({...g,id:uid(),boardId:uid()+uid(),boardToken:uid()+uid()+uid()}));setScenes(v=>[...v,copy]);setSelected(copy.id)};
- const addScene=(withParticipants=false)=>{const n=mediaScene(withParticipants?'NUEVA PARTICIPANTES':'NUEVA ESCENA',withParticipants);setScenes(v=>[...v,n]);setSelected(n.id);setTab('Perfiles');setDirty(true)};
- const removeScene=id=>{if(scenes.length<=1)return say('Debe quedar al menos una escena');const next=scenes.filter(s=>s.id!==id);setScenes(next);setSelected(next[0]?.id||'');setDirty(true)};
+ const duplicateProfile=()=>{const id=uid();const duplicate=JSON.parse(JSON.stringify(profile));duplicate.id=id;duplicate.name+=' (copia)';duplicate.scenes=duplicate.scenes.map(s=>({...s,id:uid(),guests:s.guests.map(g=>({...g,id:uid(),boardId:uid()+uid(),boardToken:uid()+uid()+uid()}))}));updateProfiles(v=>[...v,duplicate]);choose(id,'')};
+ const deleteProfile=()=>{if(profiles.length===1)return say('Debes conservar un perfil');if(!window.confirm('¿Eliminar este perfil y todas sus escenas?'))return;updateProfiles(v=>v.filter(p=>p.id!==profile.id));choose(profiles.find(p=>p.id!==profile.id)?.id,'')};
+ const duplicateScene=()=>{if(!scene)return;const copy=JSON.parse(JSON.stringify(scene));copy.id=uid();copy.name+=' (copia)';copy.guests=copy.guests.map(g=>({...g,id:uid(),boardId:uid()+uid(),boardToken:uid()+uid()+uid()}));setScenes(v=>[...v,copy]);choose(profile.id,copy.id)};
+ const addScene=(withParticipants=false)=>{const n=mediaScene(withParticipants?'NUEVA PARTICIPANTES':'NUEVA ESCENA',withParticipants);setScenes(v=>[...v,n]);choose(profile.id,n.id);setTab('Perfiles');setDirty(true)};
+ const removeScene=id=>{if(scenes.length<=1)return say('Debe quedar al menos una escena');const next=scenes.filter(s=>s.id!==id);setScenes(next);choose(profile.id,next[0]?.id||'');setDirty(true)};
  const moveScene=(id,dir)=>setScenes(v=>{const i=v.findIndex(s=>s.id===id),j=i+dir;if(i<0||j<0||j>=v.length)return v;const c=[...v];[c[i],c[j]]=[c[j],c[i]];setDirty(true);return c});
  async function sendOnAir(s=scene){if(!s)return;setSending(true);try{const h=await fetch('/api/health',{cache:'no-store'});if(!h.ok)throw new Error('El servidor de Output no responde. Comprueba que Render esté funcionando.');const ver=Date.now();await publish({scene:JSON.parse(JSON.stringify(s)),fadeMs,version:ver});setBridgeOk(true);setLiveName(s.name);setDirty(false);say(`“${s.name}” está al aire`)}catch(e){setBridgeOk(false);say(e.message||'No se pudo enviar al aire')}finally{setSending(false)}}
  async function setMedia(s,file){try{const a=await uploadFile(file);patchScene(s.id,{asset:a});say(`Archivo cargado: ${file.name}`)}catch(e){say(e.message)}}
@@ -187,9 +219,9 @@ function App(){
    {tab==='En vivo'&&<section className="hero-grid"><div className="card"><h2>Salida actual</h2><div className="big-number">{liveName}</div><div className="row wrap"><button className="primary" disabled={sending||!scene} onClick={()=>sendOnAir(scene)}>{sending?'Enviando…':'Actualizar / Enviar al aire'}</button><button disabled={!connected} onClick={toggleStream}>{streaming?'Detener stream':'Iniciar stream'}</button><button disabled={!connected} onClick={toggleRecord}>{recording?'Detener grabación':'Iniciar grabación'}</button></div><p className="hint">La fuente de OBS debe usar <code>{outputUrl}</code> a 1920×1080.</p></div><div className="card"><h2>Preview seleccionado</h2><Preview scene={scene} scenes={scenes}/></div></section>}
 
    {tab==='Perfiles'&&<section>
-     <div className="card"><div className="title-row"><div><h2>Perfiles de producción</h2><p className="muted">Cada perfil tiene escenas y participantes independientes.</p></div><div className="row wrap"><button className="primary" onClick={addProfile}>+ Crear perfil</button><button onClick={renameProfile}>Renombrar</button><button onClick={duplicateProfile}>Duplicar</button><button className="danger" onClick={deleteProfile}>Eliminar</button></div></div><div className="scene-grid">{profiles.map(p=><button key={p.id} className={p.id===profile?.id?'scene current':'scene'} onClick={()=>{setProfileId(p.id);setSelected('')}}>📁 {p.name}<small>{p.scenes.length} escenas</small></button>)}</div></div>
+     <div className="card"><div className="title-row"><div><h2>Perfiles de producción</h2><p className="muted">Cada perfil tiene escenas y participantes independientes.</p></div><div className="row wrap"><button className="primary" onClick={addProfile}>+ Crear perfil</button><button onClick={renameProfile}>Renombrar</button><button onClick={duplicateProfile}>Duplicar</button><button className="danger" onClick={deleteProfile}>Eliminar</button></div></div><div className="scene-grid">{profiles.map(p=><button key={p.id} className={p.id===profile?.id?'scene current':'scene'} onClick={()=>choose(p.id,'')}>📁 {p.name}<small>{p.scenes.length} escenas</small></button>)}</div></div>
      <div className="controlbar"><div><span className={dirty?'pending-pill':'pending-pill clean'}>{dirty?'CAMBIOS SIN PUBLICAR':'SIN CAMBIOS'}</span><span className="muted"> El preview cambia aquí, pero OBS no cambia hasta “Enviar al aire”.</span></div><div className="row wrap"><label className="inline-control">Fade <input type="number" min="0" max="2000" step="50" value={fadeMs} onChange={e=>setFadeMs(clamp(e.target.value,0,2000))}/> ms</label><button className="primary" disabled={sending||!scene} onClick={()=>sendOnAir(scene)}>{sending?'Enviando…':'Actualizar / Enviar al aire'}</button></div></div>
-     <div className="scenes-layout"><div className="card scene-library"><div className="title-row"><h2>Escenas — {profile?.name}</h2><div className="row wrap"><button onClick={()=>addScene(false)}>+ Escena</button><button onClick={()=>addScene(true)}>+ Escena con participantes</button></div></div><div className="scene-grid">{scenes.map(s=><button key={s.id} className={s.id===scene?.id?'scene current':'scene'} onClick={()=>setSelected(s.id)}><span className="scene-dot"/>{s.name}<small>{s.participantsEnabled?'Archivo + Participantes':'Archivo'}</small></button>)}</div></div>
+     <div className="scenes-layout"><div className="card scene-library"><div className="title-row"><h2>Escenas — {profile?.name}</h2><div className="row wrap"><button onClick={()=>addScene(false)}>+ Escena</button><button onClick={()=>addScene(true)}>+ Escena con participantes</button></div></div><div className="scene-grid">{scenes.map(s=><button key={s.id} className={s.id===scene?.id?'scene current':'scene'} onClick={()=>choose(profile.id,s.id)}><span className="scene-dot"/>{s.name}<small>{s.participantsEnabled?'Archivo + Participantes':'Archivo'}</small></button>)}</div></div>
        <div className="card preview-card"><div className="title-row"><h2>Preview de escena — 1920 × 1080</h2><span className="preview-name">{scene?.name}</span></div><Preview scene={scene} scenes={scenes}/></div>
      </div>
      {scene&&<div className="card editor-card"><div className="scene-head"><label className="name-edit">Nombre de la escena<input value={scene.name} onChange={e=>patchScene(scene.id,{name:e.target.value})}/></label><div className="row"><button onClick={()=>moveScene(scene.id,-1)}>← Mover</button><button onClick={()=>moveScene(scene.id,1)}>Mover →</button><button onClick={duplicateScene}>Duplicar escena</button><button className="danger" onClick={()=>removeScene(scene.id)}>Eliminar</button></div></div><MediaEditor scene={scene} patch={p=>patchScene(scene.id,p)} onFile={f=>setMedia(scene,f)}/><LayerEditor scene={scene} patch={p=>patchScene(scene.id,p)}/><div className="participants-toggle-row"><label className="switchline"><input type="checkbox" checked={!!scene.participantsEnabled} onChange={e=>patchScene(scene.id,{participantsEnabled:e.target.checked})}/><span>Participantes en esta escena</span><b>{scene.participantsEnabled?'ACTIVADOS':'DESACTIVADOS'}</b></label></div>{scene.participantsEnabled&&<ParticipantsEditor scene={scene} patch={p=>patchScene(scene.id,p)} onBackground={f=>setBackground(scene,f)} onMode={(guestId,mode)=>fetch('/api/program/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sceneId:scene.id,guestId,mode})}).catch(()=>{})}/>}</div>}
