@@ -138,3 +138,94 @@ body:not(.output-mode) ::-webkit-scrollbar-track{background:rgba(0,0,0,.08)}
 @media (prefers-reduced-motion:reduce){
   body:not(.output-mode) button{transition:none}
 }
+
+/* =====================================================================
+   MODO NOCHE — se activa con <html data-theme="night"> (botón del panel)
+   Fondo oscuro, texto crema, acentos amarillos. /output sigue intacto.
+   ===================================================================== */
+.theme-toggle{white-space:nowrap}
+
+html[data-theme="night"]{
+  color-scheme:dark;
+  --egg-ink:#F4F0E1;
+  --egg-white:#1B1B1E;
+  --egg-yellow-soft:#2C2C31;
+  --egg-shadow:4px 4px 0 var(--egg-yellow);
+  --egg-shadow-sm:3px 3px 0 var(--egg-yellow);
+}
+html[data-theme="night"] body:not(.output-mode){
+  background-color:#0E0E10;
+  background-image:repeating-linear-gradient(45deg,rgba(255,217,0,.05) 0 7px,transparent 7px 14px);
+  color:var(--egg-ink);
+}
+
+/* Cabecera */
+html[data-theme="night"] body:not(.output-mode) .eyebrow{background:var(--egg-yellow);color:#111}
+html[data-theme="night"] body:not(.output-mode) h1{color:var(--egg-yellow)}
+html[data-theme="night"] body:not(.output-mode) .bridge-ok{color:#4dffb0}
+html[data-theme="night"] body:not(.output-mode) .bridge-bad{color:#ff7aa8}
+html[data-theme="night"] body:not(.output-mode) .dot{background:#2C2C31}
+html[data-theme="night"] body:not(.output-mode) .dot.on{background:var(--egg-green)}
+
+/* Botones */
+html[data-theme="night"] body:not(.output-mode) button:hover{background:var(--egg-yellow-soft);box-shadow:4px 4px 0 var(--egg-yellow)}
+html[data-theme="night"] body:not(.output-mode) button:active{box-shadow:0 0 0 var(--egg-yellow)}
+html[data-theme="night"] body:not(.output-mode) nav button.active{background:var(--egg-yellow);color:#111;border-color:var(--egg-yellow)}
+html[data-theme="night"] body:not(.output-mode) .primary{background:var(--egg-pink);color:#fff;border-color:var(--egg-ink)}
+html[data-theme="night"] body:not(.output-mode) .primary:hover{background:#ff5088}
+html[data-theme="night"] body:not(.output-mode) .danger{background:var(--egg-white);color:#ff7aa8}
+html[data-theme="night"] body:not(.output-mode) .danger:hover{background:#3a1626}
+
+/* Tarjetas */
+html[data-theme="night"] body:not(.output-mode) .card{box-shadow:6px 6px 0 var(--egg-yellow)}
+html[data-theme="night"] body:not(.output-mode) .muted,
+html[data-theme="night"] body:not(.output-mode) .hint{color:rgba(244,240,225,.66)}
+html[data-theme="night"] body:not(.output-mode) .asset-ok,
+html[data-theme="night"] body:not(.output-mode) .preload-on{color:#4dffb0}
+html[data-theme="night"] body:not(.output-mode) .preload-off{color:rgba(244,240,225,.45)}
+html[data-theme="night"] body:not(.output-mode) .preview-name,
+html[data-theme="night"] body:not(.output-mode) .switchline b,
+html[data-theme="night"] body:not(.output-mode) .p-integrated-note{color:#ff7aa8}
+html[data-theme="night"] body:not(.output-mode) .pending-pill{background:var(--egg-yellow);color:#111}
+html[data-theme="night"] body:not(.output-mode) .pending-pill.clean{background:#2C2C31;color:rgba(244,240,225,.6)}
+
+/* Escenas */
+html[data-theme="night"] body:not(.output-mode) .scene{background:var(--egg-white)}
+html[data-theme="night"] body:not(.output-mode) .scene small{color:rgba(244,240,225,.6)}
+html[data-theme="night"] body:not(.output-mode) .scene-dot{background:#55555c}
+html[data-theme="night"] body:not(.output-mode) .scene.current{background:var(--egg-green);color:#111;border-color:#111;box-shadow:var(--egg-shadow-sm),inset 6px 0 0 var(--egg-pink)}
+html[data-theme="night"] body:not(.output-mode) .scene.current small{color:rgba(17,17,17,.75)}
+html[data-theme="night"] body:not(.output-mode) .scene.current .scene-dot{background:var(--egg-pink);border-color:#111}
+
+/* Vista previa */
+html[data-theme="night"] body:not(.output-mode) .screen{border-color:var(--egg-yellow);box-shadow:4px 4px 0 var(--egg-yellow)}
+html[data-theme="night"] body:not(.output-mode) .xy{border-color:var(--egg-yellow)}
+
+/* Formularios */
+html[data-theme="night"] body:not(.output-mode) input,
+html[data-theme="night"] body:not(.output-mode) select{background:#0E0E10;color:var(--egg-ink);border-color:#6b6b72}
+html[data-theme="night"] body:not(.output-mode) input:focus,
+html[data-theme="night"] body:not(.output-mode) select:focus{border-color:var(--egg-yellow);box-shadow:0 0 0 3px rgba(255,217,0,.35)}
+html[data-theme="night"] body:not(.output-mode) input[type=range]{background:transparent;border:0}
+html[data-theme="night"] body:not(.output-mode) input[type=range]{accent-color:var(--egg-yellow)}
+
+/* Bloques secundarios */
+html[data-theme="night"] body:not(.output-mode) .source-list div,
+html[data-theme="night"] body:not(.output-mode) .preload-row,
+html[data-theme="night"] body:not(.output-mode) .participants-toggle-row,
+html[data-theme="night"] body:not(.output-mode) .board-controls,
+html[data-theme="night"] body:not(.output-mode) .layer-editor{background:#232327;border-color:#5a5a60;color:var(--egg-ink)}
+html[data-theme="night"] body:not(.output-mode) .source-list span{color:rgba(244,240,225,.6)}
+html[data-theme="night"] body:not(.output-mode) .visibility:not(.on){background:var(--egg-green);color:#111;border-color:#111}
+html[data-theme="night"] body:not(.output-mode) .layer-row.dragging{background:#3a3300;border-color:var(--egg-yellow)}
+html[data-theme="night"] body:not(.output-mode) .output-info code,
+html[data-theme="night"] body:not(.output-mode) .hint code,
+html[data-theme="night"] body:not(.output-mode) .board-link code{background:#000;color:var(--egg-yellow)}
+
+/* Aviso y pizarra */
+html[data-theme="night"] body:not(.output-mode) .notice{background:var(--egg-yellow);color:#111;border-color:#111;box-shadow:5px 5px 0 var(--egg-pink)}
+html[data-theme="night"] body:not(.output-mode) .board-drawing{border-color:var(--egg-yellow);box-shadow:6px 6px 0 var(--egg-yellow)}
+
+/* Scrollbars */
+html[data-theme="night"] body:not(.output-mode) ::-webkit-scrollbar-thumb{background:var(--egg-yellow);border-color:#0E0E10}
+html[data-theme="night"] body:not(.output-mode) ::-webkit-scrollbar-track{background:rgba(255,255,255,.06)}

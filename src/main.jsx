@@ -241,6 +241,8 @@ function App(){
  const [selected,setSelected]=useState('');
  const selectionReady=useRef(false), remoteSelection=useRef(false), lastSelectionVersion=useRef(0), lastSelectionEdit=useRef(0);
  const [tab,setTab]=useState('En vivo');
+ const [night,setNight]=useState(()=>{try{return localStorage.getItem('egg-theme')==='night'}catch{return false}});
+ useEffect(()=>{document.documentElement.dataset.theme=night?'night':'day';try{localStorage.setItem('egg-theme',night?'night':'day')}catch{}},[night]);
  const [dirty,setDirty]=useState(false),[notice,setNotice]=useState(''),[sending,setSending]=useState(false),[liveName,setLiveName]=useState('—'),[bridgeOk,setBridgeOk]=useState(false);
  const [host,setHost]=useState(localStorage.getItem('obsHost')||'ws://127.0.0.1:4455');
  const [password,setPassword]=useState(localStorage.getItem('obsPassword')||'');
@@ -306,7 +308,7 @@ function App(){
  const audio=useMemo(()=>inputs.filter(i=>/audio|mic|desktop|capture|browser|ffmpeg/i.test(i.inputKind||'')),[inputs]);
 
  return <div className="app">
-   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.12</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
+   <header><div><div className="eyebrow">EGG0LIMPIADAS</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span><button className="theme-toggle" onClick={()=>setNight(n=>!n)} title="Cambiar entre modo día y noche">{night?'☀️ Día':'🌙 Noche'}</button></div></header>
    {notice&&<div className="notice">{notice}</div>}
    <nav>{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</nav>
 
@@ -360,4 +362,4 @@ function ParticipantsEditor({scene,patch,onBackground,onMode}){
 }
 function XYStage({guests,patch,bg,opacity}){const ref=useRef(null),act=useRef(null);const to=(e,r)=>({x:(e.clientX-r.left)/r.width*1920,y:(e.clientY-r.top)/r.height*1080});const down=(e,g,corner=null)=>{e.preventDefault();e.stopPropagation();const r=ref.current.getBoundingClientRect(),p=to(e,r);act.current={id:g.id,corner,p,box:{x:g.x,y:g.y,w:g.w,h:g.h}};e.currentTarget.setPointerCapture?.(e.pointerId)};const move=e=>{const a=act.current;if(!a)return;const r=ref.current.getBoundingClientRect(),p=to(e,r),dx=p.x-a.p.x,dy=p.y-a.p.y,b=a.box;if(!a.corner)return patch(a.id,{x:clamp(b.x+dx,0,1920-b.w),y:clamp(b.y+dy,0,1080-b.h)});let{x,y,w,h}=b;const mw=80,mh=45,c=a.corner;if(c.includes('e'))w=clamp(b.w+dx,mw,1920-b.x);if(c.includes('s'))h=clamp(b.h+dy,mh,1080-b.y);if(c.includes('w')){const nx=clamp(b.x+dx,0,b.x+b.w-mw);w=b.w+(b.x-nx);x=nx}if(c.includes('n')){const ny=clamp(b.y+dy,0,b.y+b.h-mh);h=b.h+(b.y-ny);y=ny}patch(a.id,{x,y,w,h})};return <div className="xy" ref={ref} onPointerMove={move} onPointerUp={()=>act.current=null} onPointerCancel={()=>act.current=null}>{bg?.url&&<img src={bg.url} className="xybg" alt="" style={{opacity:clamp(opacity,0,100)/100}}/>}<div className="safe-frame"/>{guests.filter(g=>g.visible).map(g=><div key={g.id} className="box" style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}} onPointerDown={e=>down(e,g)}><span>#{g.id}</span><small>{g.name}</small>{['nw','ne','sw','se'].map(c=><i key={c} className={`handle ${c}`} onPointerDown={e=>down(e,g,c)}/>)}</div>)}</div>}
 
-const out=window.location.pathname.replace(/\/+$/,'')==='/output';const isBoard=window.location.pathname.startsWith('/pizarra/');if(out)document.body.classList.add('output-mode');createRoot(document.getElementById('root')).render(out?<Output/>:isBoard?<BoardPage/>:<App/>);
+const out=window.location.pathname.replace(/\/+$/,'')==='/output';const isBoard=window.location.pathname.startsWith('/pizarra/');if(out)document.body.classList.add('output-mode');if(!out){try{document.documentElement.dataset.theme=localStorage.getItem('egg-theme')==='night'?'night':'day'}catch{}}createRoot(document.getElementById('root')).render(out?<Output/>:isBoard?<BoardPage/>:<App/>);

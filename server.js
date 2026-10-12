@@ -275,4 +275,4 @@ const server = http.createServer((req, res) => {
 });
 
 const PORT = Number(process.env.PORT) || 5173;
-server.listen(PORT, '0.0.0.0', () => console.log(`SREGGO Control Room V18.11 escuchando en puerto ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Egg0limpiadas escuchando en puerto ${PORT}`));
