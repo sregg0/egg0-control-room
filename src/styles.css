@@ -48,3 +48,9 @@
 .tv-incoming{transition:opacity 300ms linear!important}
 .persistent-visual,.program-layer{animation:none!important}
 .persistent-vdo{transition:none!important}
+
+/* V17 FIX: exactly one page-side crossfade. Retain active media nodes. */
+.tv-slot{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:#000;pointer-events:none;transition:none;contain:layout paint}
+.tv-slot.tv-target{transition:opacity 300ms linear!important;will-change:opacity}
+.tv-slot .persistent-current{position:absolute;inset:0}
+.tv-slot .persistent-vdo{transition:none!important}

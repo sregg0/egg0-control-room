@@ -72,48 +72,70 @@ function ParticipantsOutput({scene,interactive=false}){
    {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
  </div>;
 }
-// V17 TV TRANSITIONS: Prepare the incoming *whole* scene off-air and crossfade
-// complete scene canvases. Never animate individual cameras across scene cuts.
+// V17: two stable output slots. A completed TAKE never remounts the
+// incoming scene: its mounted iframe/video instances become the on-air layer.
+// One and only one 300ms opacity transition happens inside /output.
 function Output(){
- const [program,setProgram]=useState({scene:null,fadeMs:300,version:0});
- const [incoming,setIncoming]=useState(null);
- const [fadeStarted,setFadeStarted]=useState(false);
- const programRef=useRef(program),incomingRef=useRef(null),lastVersion=useRef(-1);
- const timer=useRef(null),commitTimer=useRef(null);
- const incomingRefSet=n=>{incomingRef.current=n;setIncoming(n)};
- const apply=n=>{
-   const next=n||{scene:null,fadeMs:300,version:0};
-   if(Number(next.version||0)===Number(lastVersion.current))return;
-   lastVersion.current=Number(next.version||0);
-   clearTimeout(timer.current);clearTimeout(commitTimer.current);
-   // A new TAKE during a transition replaces the queued target; the on-air
-   // program always remains visible until the next target has been staged.
-   if(!programRef.current?.scene){programRef.current=next;setProgram(next);incomingRefSet(null);return}
-   incomingRefSet(next);setFadeStarted(false);
-   // Give React one short render window to mount the incoming canvas.
-   // Never add a fixed 1.4-second camera wait to the TAKE.
-   const wait=20;
-   timer.current=setTimeout(()=>{
-     if(incomingRef.current!==next)return;
-     setFadeStarted(true);
-     const duration=300;
-     commitTimer.current=setTimeout(()=>{programRef.current=next;setProgram(next);incomingRefSet(null);setFadeStarted(false)},duration+40);
-   },wait);
+ const [slots,setSlots]=useState([null,null]);
+ const [onAir,setOnAir]=useState(0);
+ const [take,setTake]=useState(null);
+ const [running,setRunning]=useState(false);
+ const lastVersion=useRef(null);
+ const slotsRef=useRef([null,null]),onAirRef=useRef(0);
+ const takeRef=useRef(null),timers=useRef([]),raf=useRef([]);
+ const clearScheduled=()=>{
+   timers.current.forEach(clearTimeout);timers.current=[];
+   raf.current.forEach(cancelAnimationFrame);raf.current=[];
+ };
+ const apply=(payload)=>{
+   if(!payload || !payload.scene)return;
+   const version=String(payload.version??'');
+   if(version===lastVersion.current)return;
+   lastVersion.current=version;
+   clearScheduled();
+   const current=onAirRef.current;
+   // First scene: show immediately, without fading up from black.
+   if(!slotsRef.current[current]){
+     const updated=[...slotsRef.current];updated[current]=payload.scene;
+     slotsRef.current=updated;setSlots(updated);
+     takeRef.current=null;setTake(null);setRunning(false);
+     return;
+   }
+   const target=1-current;
+   const updated=[...slotsRef.current];updated[target]=payload.scene;
+   slotsRef.current=updated;setSlots(updated);
+   takeRef.current={target};setTake({target});setRunning(false);
+   // Two paint frames allow the target DOM to mount at opacity zero. No
+   // artificial camera-wait timers or second verification request.
+   const first=requestAnimationFrame(()=>{
+     const second=requestAnimationFrame(()=>{
+       if(takeRef.current?.target!==target)return;
+       setRunning(true);
+       const done=setTimeout(()=>{
+         if(takeRef.current?.target!==target)return;
+         onAirRef.current=target;setOnAir(target);
+         takeRef.current=null;setTake(null);setRunning(false);
+         // Only detach the outgoing scene; the incoming DOM is retained.
+         const final=[...slotsRef.current];final[current]=null;
+         slotsRef.current=final;setSlots(final);
+       },320);
+       timers.current.push(done);
+     });raf.current.push(second);
+   });raf.current.push(first);
  };
  useEffect(()=>{
-  let stopped=false, fallback;
-  const refresh=async()=>{try{const r=await fetch('/api/program',{cache:'no-store'});if(r.ok&&!stopped)apply(await r.json())}catch{}};
-  const stream=new EventSource('/api/program/events');
-  stream.addEventListener('program',e=>{if(stopped)return;try{apply(JSON.parse(e.data))}catch{}});
-  // Only poll when the real-time channel is unavailable.
-  stream.onerror=()=>{if(!fallback)fallback=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1500)};
-  refresh();
-  return()=>{stopped=true;stream.close();clearInterval(fallback);clearTimeout(timer.current);clearTimeout(commitTimer.current)};
+   let stopped=false, fallback;
+   const refresh=async()=>{try{const r=await fetch('/api/program',{cache:'no-store'});if(r.ok&&!stopped)apply(await r.json())}catch{}};
+   const stream=new EventSource('/api/program/events');
+   stream.addEventListener('program',e=>{if(stopped)return;try{apply(JSON.parse(e.data))}catch{}});
+   stream.onerror=()=>{if(!fallback)fallback=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1500)};
+   refresh();
+   return()=>{stopped=true;stream.close();clearInterval(fallback);clearScheduled()};
  },[]);
- const duration=300;
  return <div className="program-root persistent-output">
-   <div className="tv-scene tv-onair"><PersistentCurrentCanvas scenes={[]} scene={program?.scene} fadeMs={0}/></div>
-   {incoming?.scene&&<div className={`tv-scene tv-incoming ${fadeStarted?'tv-take':''}`} style={{'--tv-duration':`${duration}ms`}}><PersistentCurrentCanvas scenes={[]} scene={incoming.scene} fadeMs={0}/></div>}
+   {[0,1].map(i=><div key={i} className={`tv-slot ${take?.target===i?'tv-target':''} ${take?.target===i&&running?'tv-taking':''}`} style={{zIndex:take?.target===i?2:i===onAir?1:0,opacity:take?.target===i?(running?1:0):i===onAir?1:0}}>
+     {slots[i]&&<PersistentCurrentCanvas scenes={[]} scene={slots[i]} fadeMs={0}/>}
+   </div>)}
  </div>;
 }
 function PersistentCurrentCanvas({scenes,scene,fadeMs}){
