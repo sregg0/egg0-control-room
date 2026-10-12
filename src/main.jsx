@@ -72,59 +72,35 @@ function ParticipantsOutput({scene,interactive=false}){
    {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
  </div>;
 }
-// V18.2: direct cut only. Output renders one active composition.
-// No transitions, staging, fades, readiness waits, or animated layers.
+// V18.3: ABSOLUTE DIRECT CUT. No transition or transition layers in /output.
+// A newly received program replaces the previous composition in the same React commit.
 function Output(){
  const [scene,setScene]=useState(null);
  const versionRef=useRef(0);
- const accept=payload=>{
-   if(!payload?.scene)return;
-   const version=Number(payload.version)||0;
-   if(version && version<=versionRef.current)return;
-   if(version)versionRef.current=version;
-   setScene(payload.scene);
- };
  useEffect(()=>{
    let stopped=false;
    let fallback=null;
+   const accept=payload=>{
+     if(stopped||!payload?.scene)return;
+     const version=Number(payload.version)||0;
+     if(version && version<=versionRef.current)return;
+     if(version)versionRef.current=version;
+     setScene(payload.scene);
+   };
    const refresh=async()=>{try{
      const r=await fetch('/api/program',{cache:'no-store'});
-     if(r.ok&&!stopped)accept(await r.json());
+     if(r.ok)accept(await r.json());
    }catch{}};
    refresh();
    const stream=new EventSource('/api/program/events');
-   stream.addEventListener('program',e=>{if(stopped)return;try{accept(JSON.parse(e.data))}catch{}});
+   stream.addEventListener('program',e=>{try{accept(JSON.parse(e.data))}catch{}});
    stream.onerror=()=>{if(!fallback)fallback=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1500)};
    return()=>{stopped=true;stream.close();if(fallback)clearInterval(fallback)};
  },[]);
- return <div className="program-root persistent-output">
-   <PersistentCurrentCanvas scenes={[]} scene={scene} fadeMs={0}/>
+ return <div className="program-root output-direct-cut">
+   {scene?<SceneRenderer scene={scene}/>:<div className="empty-program"><span>Sin escena</span></div>}
  </div>;
 }
-function PersistentCurrentCanvas({scenes,scene,fadeMs}){
- if(!scene)return <div className="persistent-current"><div className="empty-program"><span>Sin escena</span></div><PersistentVdoPool scenes={scenes} scene={null} fadeMs={fadeMs}/></div>;
- const layers=Array.isArray(scene.layers)?scene.layers:['background','media','participants'];
- const bgZ=Math.max(0,layers.indexOf('background'))+1,mediaZ=Math.max(0,layers.indexOf('media'))+1;
- const a=scene.asset;
- return <div className="persistent-current">
-   {scene.background?.url&&<img className="layer-bg" src={scene.background.url} alt="" style={{zIndex:bgZ,opacity:clamp(scene.bgOpacity??35,0,100)/100}}/>}
-   {a&&(isVideo(a)?<video key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:mediaZ}} src={a.url} autoPlay playsInline loop={scene.loop!==false} muted={scene.muted!==false}/>:<img key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:mediaZ}} src={a.url} alt=""/>)}
-   <PersistentVdoPool scenes={scenes} scene={scene} fadeMs={fadeMs}/>
- </div>;
-}
-function SceneVisualOnly({scene}){
- if(!scene)return <div className="empty-program"><span>Sin escena</span></div>;
- const layers=Array.isArray(scene.layers)?scene.layers:['background','media','participants'];
- const render=(key,index)=>{const z=index+1;if(key==='background')return scene.background?.url?<img key="bg" className="layer-bg" src={scene.background.url} alt="" style={{zIndex:z,opacity:clamp(scene.bgOpacity??35,0,100)/100}}/>:null;if(key==='media'){const a=scene.asset;return a?(isVideo(a)?<video key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:z}} src={a.url} autoPlay playsInline loop={scene.loop!==false} muted={scene.muted!==false}/>:<img key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:z}} src={a.url} alt=""/>):null}return null};
- return <div className="scene-composite">{layers.map(render)}</div>;
-}
-function PersistentVdoPool({scenes,scene,fadeMs}){
- const pool=useMemo(()=>{const map=new Map();for(const s of [...(scenes||[]),...(scene?[scene]:[])]){for(const g of s?.guests||[]){const url=normalizeVdo(g?.url);if(url&&!map.has(url))map.set(url,{url,name:g?.name||'Invitado'})}}return [...map.values()]},[scenes,scene]);
- const activeByUrl=useMemo(()=>{const map=new Map();if(scene?.participantsEnabled){for(const g of scene?.guests||[]){const url=normalizeVdo(g?.url);if(url&&g.visible)map.set(url,g)}}return map},[scene]);
- const layers=Array.isArray(scene?.layers)?scene.layers:['background','media','participants'];const pIndex=Math.max(0,layers.indexOf('participants'))+1;
- return <div className="persistent-vdo-root" style={{zIndex:pIndex}}>{pool.map(item=>{const g=activeByUrl.get(item.url);const active=!!g&&g.mode!=='board';return <div className={`persistent-vdo ${active?'active':''}`} key={item.url} style={active?{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`,'--camfade':`${clamp(fadeMs,0,3000)}ms`}:{'--camfade':`${clamp(fadeMs,0,3000)}ms`}}><iframe src={item.url} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g?.name||item.name}/></div>})}{(scene?.participantsEnabled?scene.guests||[]:[]).filter(g=>g.visible&&g.mode==='board').map(g=><div key={'board-'+g.id} className="persistent-board" style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}><BoardViewer boardId={g.boardId}/></div>)}</div>;
-}
-
 function BoardCanvas({strokes,working,background='#ffffff'}){
  const ref=useRef(null);
  useEffect(()=>{const c=ref.current;if(!c)return;const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle=background;ctx.fillRect(0,0,c.width,c.height);for(const line of [...strokes,...(working?[working]:[])]){const pts=line.points||[];if(!pts.length)continue;ctx.strokeStyle=line.color||'#111';ctx.fillStyle=line.color||'#111';ctx.lineWidth=line.size||4;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(const point of pts.slice(1))ctx.lineTo(point[0],point[1]);if(pts.length===1){ctx.arc(pts[0][0],pts[0][1],Math.max(1,ctx.lineWidth/2),0,Math.PI*2);ctx.fill()}else ctx.stroke()}},[strokes,working,background]);return <canvas ref={ref} width="1280" height="720" className="board-canvas"/>;
@@ -225,7 +201,7 @@ function App(){
  const audio=useMemo(()=>inputs.filter(i=>/audio|mic|desktop|capture|browser|ffmpeg/i.test(i.inputKind||'')),[inputs]);
 
  return <div className="app">
-   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.2</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
+   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.3</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
    {notice&&<div className="notice">{notice}</div>}
    <nav>{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</nav>
 
@@ -247,19 +223,8 @@ function App(){
 }
 
 function Preview({scene,scenes}){return <div className="preview-shell"><div className="screen"><PreviewPersistentCanvas scene={scene} scenes={scenes}/></div></div>}
-function PreviewPersistentCanvas({scene,scenes}){
- if(!scene)return <div className="empty-program"><span>Sin escena</span></div>;
- const layers=Array.isArray(scene.layers)?scene.layers:['background','media','participants'];
- const bgZ=Math.max(0,layers.indexOf('background'))+1,mediaZ=Math.max(0,layers.indexOf('media'))+1;
- const a=scene.asset;
- const anyVisual=!!scene.asset||!!scene.background?.url||!!scene.participantsEnabled;
- return <div className="persistent-current preview-persistent">
-   {scene.background?.url&&<img className="layer-bg" src={scene.background.url} alt="" style={{zIndex:bgZ,opacity:clamp(scene.bgOpacity??35,0,100)/100}}/>}
-   {a&&(isVideo(a)?<video key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:mediaZ}} src={a.url} autoPlay playsInline loop={scene.loop!==false} muted={scene.muted!==false}/>:<img key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:mediaZ}} src={a.url} alt=""/>)}
-   <PersistentVdoPool scenes={scenes} scene={scene} fadeMs={0}/>
-   {!anyVisual&&<div className="empty-program"><span>{scene.name}<small>Carga un archivo para ver el preview</small></span></div>}
- </div>;
-}
+function PreviewPersistentCanvas({scene}){return <SceneRenderer scene={scene}/>;}
+
 function MediaEditor({scene,patch,onFile}){return <div className="media-editor"><div><h2>Archivo de la escena</h2><input type="file" accept="image/*,video/mp4,video/webm,video/quicktime" onChange={e=>onFile(e.target.files?.[0])}/>{scene.asset?<div className="asset-ok">✓ {scene.asset.name}</div>:<div className="muted">Carga una imagen o video. El preview aparecerá arriba inmediatamente.</div>}</div><div className="row wrap"><label>Ajuste<select value={scene.fit||'cover'} onChange={e=>patch({fit:e.target.value})}><option value="cover">Cubrir pantalla</option><option value="contain">Mostrar completo</option><option value="fill">Estirar</option></select></label>{isVideo(scene.asset)&&<><label className="check"><input type="checkbox" checked={scene.loop!==false} onChange={e=>patch({loop:e.target.checked})}/> Repetir video</label><label className="check"><input type="checkbox" checked={scene.muted!==false} onChange={e=>patch({muted:e.target.checked})}/> Sin audio</label></>}</div></div>}
 function LayerEditor({scene,patch}){
  const labels={background:'Fondo / overlay',media:'Archivo de escena',participants:'Participantes'};
