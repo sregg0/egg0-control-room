@@ -78,12 +78,24 @@ const preloadScene=scene=>{const urls=[scene?.asset&&!isVideo(scene.asset)?scene
 
 // V18.4: los iframes de VDO.Ninja viven en un pool persistente. Un iframe movido en el DOM se recarga,
 // así que se mantienen montados (ocultos si no están al aire) y solo cambian de posición.
+
+// V18.5: panel de diagnóstico. Abre /output?debug=1 para ver si los iframes de VDO.Ninja se recrean.
+const DBG=typeof location!=='undefined'&&new URLSearchParams(location.search).has('debug');
+const dbgLog=[],dbgStat={};
+const dlog=(label,msg,kind)=>{if(!DBG)return;const st=dbgStat[label]=dbgStat[label]||{mounts:0,loads:0,state:'—'};if(kind==='mount')st.mounts++;if(kind==='load')st.loads++;if(kind==='state')st.state=msg;dbgLog.unshift(`${(performance.now()/1000).toFixed(1)}s  ${label}: ${msg}`);dbgLog.length=Math.min(dbgLog.length,16)};
+function DebugPanel(){
+ const [,tick]=useState(0);useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),500);return()=>clearInterval(t)},[]);
+ return <pre style={{position:'fixed',left:6,top:6,zIndex:99999,margin:0,padding:8,background:'rgba(0,0,0,.82)',color:'#7CFFB2',font:'11px/1.35 ui-monospace,Consolas,monospace',maxWidth:'60vw',pointerEvents:'none',whiteSpace:'pre-wrap'}}>{`PÁGINA cargada hace ${(performance.now()/1000).toFixed(1)}s (si esto vuelve a 0 al cambiar de escena, OBS recarga la página)\n`}{Object.entries(dbgStat).map(([k,v])=>`${k}  montajes:${v.mounts}  cargas:${v.loads}  ${v.state}\n`).join('')}{'\n'}{dbgLog.join('\n')}</pre>;
+}
 function VdoFrame({src,geom}){
  const ref=useRef(null);const active=!!geom;
+ const label=(()=>{try{const u=new URL(src);return u.searchParams.get('view')||u.searchParams.get('push')||u.searchParams.get('room')||src.slice(-14)}catch{return src.slice(-14)}})();
+ useEffect(()=>{dlog(label,'MONTADO (iframe nuevo)','mount');return()=>dlog(label,'DESMONTADO')},[]);
+ useEffect(()=>{dlog(label,active?'AL AIRE (visible)':'OCULTO (precargado)','state')},[active]);
  const sendMute=()=>{try{ref.current?.contentWindow?.postMessage({mute:!active},'*')}catch{}};
  useEffect(sendMute,[active]);
  const style=active?{left:`${geom.x/19.2}%`,top:`${geom.y/10.8}%`,width:`${geom.w/19.2}%`,height:`${geom.h/10.8}%`,opacity:1,zIndex:2}:{left:0,top:0,width:320,height:180,opacity:0,zIndex:1};
- return <div className="vdo-slot" style={style}><iframe ref={ref} src={src} onLoad={sendMute} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title="vdo" style={{pointerEvents:'none'}}/></div>;
+ return <div className="vdo-slot" style={style}><iframe ref={ref} src={src} onLoad={()=>{dlog(label,'iframe CARGADO (onload)','load');sendMute()}} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title="vdo" style={{pointerEvents:'none'}}/></div>;
 }
 function VdoPool({scene,preloadUrls}){
  const active=new Map();
@@ -137,6 +149,7 @@ function Output(){
  return <div className="program-root output-direct-cut">
    {scene?<SceneRenderer scene={scene} externalVdo/>:<div className="empty-program"><span>Sin escena</span></div>}
    <VdoPool scene={scene} preloadUrls={preloadUrls}/>
+   {DBG&&<DebugPanel/>}
  </div>;
 }
 

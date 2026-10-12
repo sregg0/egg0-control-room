@@ -1,3 +1,5 @@
+**Diagnóstico:** abre `/output?debug=1` para ver montajes/cargas de cada iframe VDO.Ninja y si la página se recarga.
+
 # SREGGO Control Room V18.2 — Corte directo
 
 El cambio de escenas en `/output` es instantáneo: no hay fade, desvanecimiento, espera de precarga ni animaciones de transición. La escena publicada reemplaza directamente a la anterior.
