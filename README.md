@@ -30,8 +30,11 @@ Antes de cambiar la rama `main`, probar esta versión en una rama nueva / servic
 
 ## V17 TV TAKE (PRUEBA)
 
-- `/output` conserva el lienzo anterior hasta montar el siguiente, luego aplica un crossfade de 350 ms (ajustable desde Perfiles).
+- `/output` conserva el lienzo anterior hasta montar el siguiente, luego aplica un crossfade de 300 ms (ajustable desde Perfiles).
 - Las cámaras y pizarras se funden con la composición; no se interpolan geometrías de cámaras durante el cambio.
 - Se añade un margen de arranque de 1,4 s para nuevas cámaras, que **no garantiza** que WebRTC tenga imagen. Probar con fuentes VDO.Ninja reales antes de producción.
 - El nuevo montaje puede mantener dos reproducciones de la cámara durante la transición. Revisar audio/eco en OBS.
 - El ZIP es experimental: no se pudo ejecutar `npm run build` en este entorno por dependencias npm no disponibles.
+
+## V17 TV Fade 300 ms
+Eliminada la pausa artificial de 1.4 s para escenas con cámaras. El TAKE monta la nueva composición y comienza el desvanecimiento de 300 ms tras una espera técnica mínima de 40 ms. La precarga efectiva de WebRTC se debe verificar con OBS y participantes reales.

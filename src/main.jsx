@@ -70,7 +70,7 @@ function ParticipantsOutput({scene,interactive=false}){
 // V17 TV TRANSITIONS: Prepare the incoming *whole* scene off-air and crossfade
 // complete scene canvases. Never animate individual cameras across scene cuts.
 function Output(){
- const [program,setProgram]=useState({scene:null,fadeMs:350,version:0});
+ const [program,setProgram]=useState({scene:null,fadeMs:300,version:0});
  const [incoming,setIncoming]=useState(null);
  const [preloadScenes,setPreloadScenes]=useState([]);
  const [fadeStarted,setFadeStarted]=useState(false);
@@ -78,7 +78,7 @@ function Output(){
  const timer=useRef(null),commitTimer=useRef(null);
  const incomingRefSet=n=>{incomingRef.current=n;setIncoming(n)};
  const apply=n=>{
-   const next=n||{scene:null,fadeMs:350,version:0};
+   const next=n||{scene:null,fadeMs:300,version:0};
    if(Number(next.version||0)===Number(lastVersion.current))return;
    lastVersion.current=Number(next.version||0);
    clearTimeout(timer.current);clearTimeout(commitTimer.current);
@@ -86,15 +86,14 @@ function Output(){
    // program always remains visible until the next target has been staged.
    if(!programRef.current?.scene){programRef.current=next;setProgram(next);incomingRefSet(null);return}
    incomingRefSet(next);setFadeStarted(false);
-   // Let the incoming browser/media sources mount while completely hidden.
-   // This is a readiness buffer, NOT proof that all WebRTC frames are ready.
-   const hasCamera=!!next.scene?.participantsEnabled&&(next.scene.guests||[]).some(g=>g.visible&&g.mode!=='board'&&g.url);
-   const wait=hasCamera?1400:120;
+   // Give React one short render window to mount the incoming canvas.
+   // Never add a fixed 1.4-second camera wait to the TAKE.
+   const wait=40;
    timer.current=setTimeout(()=>{
      if(incomingRef.current!==next)return;
      setFadeStarted(true);
-     const duration=clamp(next.fadeMs??350,0,3000);
-     commitTimer.current=setTimeout(()=>{programRef.current=next;setProgram(next);incomingRefSet(null);setFadeStarted(false)},duration+90);
+     const duration=clamp(next.fadeMs??300,0,3000);
+     commitTimer.current=setTimeout(()=>{programRef.current=next;setProgram(next);incomingRefSet(null);setFadeStarted(false)},duration+40);
    },wait);
  };
  useEffect(()=>{let stopped=false,pollProgram,pollPreload;
@@ -102,7 +101,7 @@ function Output(){
   const tickPreload=async()=>{try{const r=await fetch(`/api/preload?t=${Date.now()}`,{cache:'no-store'});if(r.ok){const d=await r.json();if(!stopped&&Array.isArray(d?.scenes))setPreloadScenes(d.scenes)}}catch{};if(!stopped)pollPreload=setTimeout(tickPreload,700)};
   tickProgram();tickPreload();return()=>{stopped=true;clearTimeout(pollProgram);clearTimeout(pollPreload);clearTimeout(timer.current);clearTimeout(commitTimer.current)}
  },[]);
- const duration=clamp(incoming?.fadeMs??350,0,3000);
+ const duration=clamp(incoming?.fadeMs??300,0,3000);
  return <div className="program-root persistent-output">
    <MediaPreloader scenes={preloadScenes}/>
    <div className="tv-scene tv-onair"><PersistentCurrentCanvas scenes={[]} scene={program?.scene} fadeMs={0}/></div>
@@ -183,7 +182,7 @@ function App(){
  const [selected,setSelected]=useState('');
  const selectionReady=useRef(false), remoteSelection=useRef(false), lastSelectionVersion=useRef(0), lastSelectionEdit=useRef(0);
  const [tab,setTab]=useState('En vivo');
- const [fadeMs,setFadeMs]=useState(()=>Number(localStorage.getItem('v8FadeMs')||350));
+ const [fadeMs,setFadeMs]=useState(()=>Number(localStorage.getItem('v17FadeMs')||300));
  const [dirty,setDirty]=useState(false),[notice,setNotice]=useState(''),[sending,setSending]=useState(false),[liveName,setLiveName]=useState('—'),[bridgeOk,setBridgeOk]=useState(false);
  const [host,setHost]=useState(localStorage.getItem('obsHost')||'ws://127.0.0.1:4455');
  const [password,setPassword]=useState(localStorage.getItem('obsPassword')||'');
@@ -216,7 +215,7 @@ function App(){
  useEffect(()=>{if(fromRemote.current){fromRemote.current=false;return}if(!studioReady||!profiles.length)return;const t=setTimeout(()=>fetch('/api/studio',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({profiles,version:Date.now()})}).catch(()=>{}),450);return()=>clearTimeout(t)},[profiles]);
  useEffect(()=>{let stopped=false;const pull=async()=>{try{const r=await fetch('/api/studio',{cache:'no-store'});const d=await r.json();if(stopped)return;setStudioReady(true);if(!Array.isArray(d.profiles)||!d.profiles.length)return;if(d.version>lastRemoteVersion.current&&Date.now()-lastLocalEdit.current>2500){lastRemoteVersion.current=d.version;fromRemote.current=true;setProfiles(d.profiles.map(p=>({...p,scenes:(p.scenes||[]).map(normalizeScene)})))}}catch{if(!stopped)setStudioReady(true)}};pull();const t=setInterval(pull,2200);return()=>{stopped=true;clearInterval(t)}},[]);
  useEffect(()=>{const t=setTimeout(()=>{fetch('/api/preload',{method:'POST',headers:{'Content-Type':'application/json','Cache-Control':'no-store'},body:JSON.stringify({scenes,version:Date.now()})}).catch(()=>{})},180);return()=>clearTimeout(t)},[scenes]);
- useEffect(()=>localStorage.setItem('v8FadeMs',String(fadeMs)),[fadeMs]);
+ useEffect(()=>localStorage.setItem('v17FadeMs',String(fadeMs)),[fadeMs]);
  useEffect(()=>{fetch('/api/health',{cache:'no-store'}).then(r=>r.json()).then(d=>setBridgeOk(!!d?.ok)).catch(()=>setBridgeOk(false));fetch('/api/program',{cache:'no-store'}).then(r=>r.json()).then(d=>setLiveName(d?.scene?.name||'—')).catch(()=>{})},[]);
  useEffect(()=>{const close=()=>{setConnected(false);setObsStatus('Desconectado')};obs.on('ConnectionClosed',close);return()=>obs.removeAllListeners()},[]);
  const say=m=>{setNotice(m);setTimeout(()=>setNotice(''),3200)};

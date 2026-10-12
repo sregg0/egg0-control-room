@@ -28,7 +28,7 @@ function broadcastBoard(id, event) {
 
 function bodyJSON(req,res,cb,max=2*1024*1024){let body='',large=false;req.setEncoding('utf8');req.on('data',c=>{body+=c;if(body.length>max)large=true});req.on('end',()=>{if(large)return json(res,413,{error:'Solicitud demasiado grande'});try{cb(JSON.parse(body||'{}'))}catch(e){json(res,400,{error:e.message})}})}
 function findBoard(id){for(const p of studio.profiles||[])for(const s of p.scenes||[])for(const g of s.guests||[])if(g.boardId===id)return g;return null}
-const DEFAULT = { scene: null, fadeMs: 350, version: 0 };
+const DEFAULT = { scene: null, fadeMs: 300, version: 0 };
 let program = { ...DEFAULT };
 let preload = { scenes: [], version: 0 };
 try {
@@ -187,7 +187,7 @@ const server = http.createServer((req, res) => {
         if (!next || typeof next !== 'object') throw new Error('Estado inválido');
         program = {
           scene: next.scene ?? null,
-          fadeMs: Number.isFinite(Number(next.fadeMs)) ? Math.max(0, Math.min(3000, Number(next.fadeMs))) : 350,
+          fadeMs: Number.isFinite(Number(next.fadeMs)) ? Math.max(0, Math.min(3000, Number(next.fadeMs))) : 300,
           version: Number(next.version) || Date.now()
         };
         // Persistir es útil, pero NUNCA debe impedir mandar al aire.

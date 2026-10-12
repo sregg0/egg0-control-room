@@ -38,7 +38,7 @@
 /* V17 TV TAKE: a true full-frame dissolve. Old frame stays until new stage is mounted. */
 .tv-scene{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:#000}
 .tv-onair{z-index:1}
-.tv-incoming{z-index:2;opacity:0;pointer-events:none;transition:opacity var(--tv-duration,350ms) linear;will-change:opacity}
+.tv-incoming{z-index:2;opacity:0;pointer-events:none;transition:opacity var(--tv-duration,300ms) linear;will-change:opacity}
 .tv-incoming.tv-take{opacity:1}
 .tv-scene .persistent-current{position:absolute;inset:0}
 .tv-scene .persistent-vdo{transition:none!important}
