@@ -1,5 +1,7 @@
 **V18.12:** orden estable de los iframes de VDO.Ninja en /output. Antes, al cambiar de escena React podía reordenar los iframes del pool; mover un iframe en el DOM lo recarga, y la cámara se veía pegada o negra mientras VDO.Ninja se reconectaba. Ahora los iframes nuevos se añaden al final y nunca se reordenan. Además, los participantes ocultos se aparcan a tamaño completo (antes 320×180), detrás del fondo de la escena.
 
+**Tema Eggolimpiadas:** `src/theme-egg.css` (amarillo, bordes negros, sombras duras). Solo afecta al panel y a la pizarra; `/output` no cambia. Para quitarlo, borra el import en `main.jsx`.
+
 **V18.11:** modos de prueba `&park=none|tiny|faint` en /output, panel de diagnóstico abajo a la izquierda (tecla D) y estadísticas de video de VDO.Ninja.
 
 **V18.10:** los participantes ocultos ya no usan opacity:0 (congelaba el video); se parquean detrás de la escena con z-index negativo.
