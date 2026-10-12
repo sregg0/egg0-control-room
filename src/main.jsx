@@ -72,9 +72,8 @@ function ParticipantsOutput({scene,interactive=false}){
    {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
  </div>;
 }
-// V18: one television dissolve, entirely inside /output.
-// Keep the old DOM mounted until the incoming scene has completed its 300ms
-// opacity animation. No second CSS transition, polling delay or camera motion.
+// V18.1: ONE dissolve in /output. No extra CSS fades, fake preloading,
+// fixed delays, or remount of the incoming scene after TAKE.
 function Output(){
  const [slots,setSlots]=useState([null,null]);
  const [onAir,setOnAir]=useState(0);
@@ -82,28 +81,20 @@ function Output(){
  const slotsRef=useRef([null,null]);
  const onAirRef=useRef(0);
  const versionRef=useRef(0);
- const queuedRef=useRef(null);
+ const pendingRef=useRef(null);
  const busyRef=useRef(false);
  const activeAnimation=useRef(null);
  const elements=useRef([null,null]);
- const commit=(target,from)=>{
-   const updated=[...slotsRef.current];updated[from]=null;
-   slotsRef.current=updated;
-   onAirRef.current=target;
-   setOnAir(target);
-   setSlots(updated);
-   setTransition(null);
-   busyRef.current=false;
-   const next=queuedRef.current;
-   queuedRef.current=null;
-   if(next) requestAnimationFrame(()=>start(next));
- };
- const start=payload=>{
+ const incomingToken=useRef(0);
+ const begin=payload=>{
    const current=onAirRef.current;
    if(!slotsRef.current[current]){
      const updated=[...slotsRef.current];updated[current]=payload.scene;
-     slotsRef.current=updated;setSlots(updated);return;
+     slotsRef.current=updated;setSlots(updated);
+     return;
    }
+   // Same visual composition: update in place, without flashing the entire screen.
+   if(JSON.stringify(slotsRef.current[current])===JSON.stringify(payload.scene))return;
    busyRef.current=true;
    const target=1-current;
    const updated=[...slotsRef.current];updated[target]=payload.scene;
@@ -113,30 +104,48 @@ function Output(){
  const accept=payload=>{
    if(!payload?.scene)return;
    const version=Number(payload.version)||0;
-   if(version && version<=versionRef.current)return;
+   if(version&&version<=versionRef.current)return;
    if(version)versionRef.current=version;
-   if(busyRef.current){queuedRef.current=payload;return;}
-   start(payload);
+   // Keep only the latest TAKE if the operator changes scenes mid-transition.
+   if(busyRef.current){pendingRef.current=payload;return;}
+   begin(payload);
  };
  useEffect(()=>{
    if(!transition)return;
+   let cancelled=false;
+   const token=++incomingToken.current;
    const {target,from}=transition;
+   const incoming=slotsRef.current[target];
    const el=elements.current[target];
    if(!el)return;
-   // A single animation owns the dissolve. Its opacity is not animated in CSS.
-   const animation=el.animate([{opacity:0},{opacity:1}],{duration:300,easing:'linear',fill:'forwards'});
-   activeAnimation.current=animation;
-   const finish=()=>{
-     if(activeAnimation.current!==animation)return;
-     activeAnimation.current=null;
-     // First make the incoming DOM fully visible, then remove the outgoing DOM.
-     el.style.opacity='1';
-     animation.cancel();
-     commit(target,from);
+   // The outgoing scene stays ON SCREEN while the incoming image is decoded.
+   // This is readiness checking, not a fixed artificial wait. Videos and
+   // cross-origin VDO.Ninja frames cannot report their first decoded frame here.
+   const prepare=async()=>{
+     const assets=[incoming?.asset,incoming?.background].filter(a=>a?.url&&!isVideo(a));
+     await Promise.all(assets.map(async a=>{
+       const image=new Image();image.src=a.url;
+       try{if(image.decode)await image.decode();else if(!image.complete)await new Promise(resolve=>{image.onload=resolve;image.onerror=resolve})}catch{}
+     }));
+     if(cancelled||token!==incomingToken.current)return;
+     const animation=el.animate([{opacity:0},{opacity:1}],{duration:300,easing:'linear',fill:'forwards'});
+     activeAnimation.current=animation;
+     animation.onfinish=()=>{
+       if(cancelled||token!==incomingToken.current||activeAnimation.current!==animation)return;
+       activeAnimation.current=null;
+       // React must own the final opacity. The incoming DOM is never rebuilt.
+       onAirRef.current=target;
+       const updated=[...slotsRef.current];updated[from]=null;
+       slotsRef.current=updated;
+       setOnAir(target);setSlots(updated);setTransition(null);
+       busyRef.current=false;
+       animation.cancel();
+       const next=pendingRef.current;pendingRef.current=null;
+       if(next)requestAnimationFrame(()=>begin(next));
+     };
    };
-   animation.onfinish=finish;
-   animation.oncancel=()=>{if(activeAnimation.current===animation)finish()};
-   return()=>{};
+   prepare();
+   return()=>{cancelled=true;incomingToken.current++;const a=activeAnimation.current;if(a){activeAnimation.current=null;a.cancel()}};
  },[transition]);
  useEffect(()=>{
    let stopped=false,fallback=null;
@@ -144,11 +153,10 @@ function Output(){
    const stream=new EventSource('/api/program/events');
    stream.addEventListener('program',e=>{if(stopped)return;try{accept(JSON.parse(e.data))}catch{}});
    stream.onerror=()=>{if(!fallback)fallback=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1500)};
-   // Initial state is already pushed on SSE connect; no competing GET request.
    return()=>{stopped=true;stream.close();if(fallback)clearInterval(fallback);activeAnimation.current?.cancel()};
  },[]);
  return <div className="program-root persistent-output">
-   {[0,1].map(i=><div key={i} ref={el=>elements.current[i]=el} className="tv18-slot" style={{zIndex:transition?.target===i?2:i===onAir?1:0,opacity:transition?.target===i?0:i===onAir?1:0}}>
+   {[0,1].map(i=><div key={i} ref={el=>elements.current[i]=el} className="tv181-slot" style={{zIndex:transition?.target===i?2:i===onAir?1:0,opacity:transition?.target===i?0:i===onAir?1:0}}>
      {slots[i]&&<PersistentCurrentCanvas scenes={[]} scene={slots[i]} fadeMs={0}/>}
    </div>)}
  </div>;
@@ -278,7 +286,7 @@ function App(){
  const audio=useMemo(()=>inputs.filter(i=>/audio|mic|desktop|capture|browser|ffmpeg/i.test(i.inputKind||'')),[inputs]);
 
  return <div className="app">
-   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
+   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.1</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
    {notice&&<div className="notice">{notice}</div>}
    <nav>{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</nav>
 

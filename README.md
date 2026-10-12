@@ -1,11 +1,15 @@
-# SREGGO Control Room V18 — Transiciones de televisión
+# SREGGO Control Room V18.1 — TV Output
 
-V18 conserva perfiles, participantes y pizarras de V17.
+## Qué cambia
+- Desvanecimiento **único** de 300 ms en `/output`, no en OBS.
+- Sin esperas artificiales ni optimizadores o precarga automática de escenas.
+- Conserva la escena saliente mientras se decodifican las imágenes de la entrante.
+- Una vez completado el desvanecimiento, el DOM de la escena nueva sigue montado; evita volver a iniciar cámaras por ese motivo.
+- Canal de eventos en tiempo real de Render a `/output` y respaldo si se cae la conexión.
 
-- `/output` usa una única disolución de **300 ms** mediante Web Animations API.
-- Mantiene la escena anterior montada hasta finalizar el efecto y conserva la entrante.
-- Recibe avisos SSE de Render; rechaza eventos de versiones antiguas.
-- No aplica precargas ni optimizadores.
-- La carga de una nueva cámara VDO.Ninja puede tardar por causas de red: la disolución no asegura que una cámara sin imagen ya esté lista.
-- **Prueba en una rama/servicio de ensayo antes de desplegar en producción.**
-- Requiere una sola instancia de Render o un bus de eventos compartido para SSE si hay varias instancias.
+## Importante
+- Las imágenes nuevas pueden necesitar descargarse antes de empezar el desvanecimiento; no hay espera fija, pero tampoco podemos prometer 0 ms de red.
+- El inicio de video de VDO.Ninja (WebRTC) no puede certificarse con `iframe.onload`; se debe comprobar con participantes reales.
+- Esta versión NO implementa control remoto global de OBS y no debe confundirse el estado del navegador con el de OBS.
+- El servidor aún almacena estado y archivos en disco local. En Render, esto requiere persistencia configurada para sobrevivir despliegues/reinicios.
+- **Prueba en una rama o instancia de Render independiente antes de sustituir producción.**

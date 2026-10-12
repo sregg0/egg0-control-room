@@ -142,7 +142,7 @@ const server = http.createServer((req, res) => {
     return json(res,405,{error:'Método no permitido'});
   }
 
-  if (pathname === '/api/health') return json(res, 200, { ok:true, version:17, mode:'persistent-output', programVersion:program.version || 0 });
+  if (pathname === '/api/health') return json(res, 200, { ok:true, version:"18.1", mode:'persistent-output', programVersion:program.version || 0 });
 
 
   if(pathname==='/api/program/mode'&&req.method==='POST')return bodyJSON(req,res,next=>{
@@ -194,12 +194,12 @@ const server = http.createServer((req, res) => {
         };
         // Persistir es útil, pero NUNCA debe impedir mandar al aire.
         try { fs.writeFileSync(stateFile, JSON.stringify(program)); }
-        catch (e) { console.warn('[V17] No se pudo guardar .program-state.json:', e.message); }
+        catch (e) { console.warn('[V18.1] No se pudo guardar .program-state.json:', e.message); }
         broadcastProgram();
-        console.log(`[V17] AL AIRE -> ${program.scene?.name || 'SIN ESCENA'} | version ${program.version}`);
+        console.log(`[V18.1] AL AIRE -> ${program.scene?.name || 'SIN ESCENA'} | version ${program.version}`);
         return json(res, 200, { ok:true, version:program.version, sceneName:program.scene?.name || null });
       } catch (e) {
-        console.error('[V17] Error publicando:', e);
+        console.error('[V18.1] Error publicando:', e);
         return json(res, 400, { ok:false, error:e?.message || 'JSON inválido' });
       }
     });

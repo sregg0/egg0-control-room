@@ -59,3 +59,8 @@
 .tv18-slot{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none;transition:none!important;animation:none!important;}
 .tv18-slot .persistent-current{position:absolute;inset:0;}
 .tv18-slot .persistent-vdo{transition:none!important;animation:none!important;}
+
+/* V18.1: output owns precisely one 300ms Web Animations dissolve. */
+.tv181-slot{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none;transition:none!important;animation:none!important}
+.tv181-slot .persistent-current{position:absolute;inset:0}
+.tv181-slot .persistent-vdo{transition:none!important;animation:none!important}
