@@ -1,6 +1,20 @@
+**V18.12:** orden estable de los iframes de VDO.Ninja en /output. Antes, al cambiar de escena React podía reordenar los iframes del pool; mover un iframe en el DOM lo recarga, y la cámara se veía pegada o negra mientras VDO.Ninja se reconectaba. Ahora los iframes nuevos se añaden al final y nunca se reordenan. Además, los participantes ocultos se aparcan a tamaño completo (antes 320×180), detrás del fondo de la escena.
+
+**V18.11:** modos de prueba `&park=none|tiny|faint` en /output, panel de diagnóstico abajo a la izquierda (tecla D) y estadísticas de video de VDO.Ninja.
+
+**V18.10:** los participantes ocultos ya no usan opacity:0 (congelaba el video); se parquean detrás de la escena con z-index negativo.
+
+**V18.9:** el panel de diagnóstico ya no se llena con view-stats de VDO.Ninja (una sola línea de estadísticas por cámara).
+
+**V18.8:** diagnóstico ampliado en /output?debug=1 (posición real de cada cámara y mensajes que envía VDO.Ninja). Añade &nomute=1 para desactivar el mensaje de silenciado.
+
+**V18.7:** modo «Siempre cargados» (por defecto): todos los participantes del perfil quedan conectados y ocultos en /output. Se guarda en el servidor, así que se reconectan solos si recargas OBS.
+
+**V18.6:** los participantes de la escena anterior se mantienen conectados un corte más (volver a la escena anterior es instantáneo). Se bloquea usar la URL de /output como participante.
+
 **Diagnóstico:** abre `/output?debug=1` para ver montajes/cargas de cada iframe VDO.Ninja y si la página se recarga.
 
-# SREGGO Control Room V18.2 — Corte directo
+# SREGGO Control Room V18.6 — Diagnóstico + Precarga
 
 El cambio de escenas en `/output` es instantáneo: no hay fade, desvanecimiento, espera de precarga ni animaciones de transición. La escena publicada reemplaza directamente a la anterior.
 

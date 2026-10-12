@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-title SREGGO Control Room V15
+title SREGGO Control Room V18.11
 where node >nul 2>nul
 if errorlevel 1 (
   echo.
@@ -15,7 +15,7 @@ if not exist node_modules (
 )
 echo.
 echo ===============================================
-echo SREGGO CONTROL ROOM V15
+echo SREGGO CONTROL ROOM V18.11
 echo Panel:  http://localhost:5173/
 echo Output: http://localhost:5173/output
 echo ===============================================
