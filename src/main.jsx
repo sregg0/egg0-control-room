@@ -72,11 +72,13 @@ function ParticipantsOutput({scene,interactive=false}){
    {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
  </div>;
 }
+const preloadScene=scene=>{const urls=[scene?.asset&&!isVideo(scene.asset)?scene.asset.url:null,scene?.background?.url].filter(Boolean);if(!urls.length)return Promise.resolve();const loads=urls.map(u=>{const i=new Image();i.src=u;return(i.decode?i.decode():Promise.resolve()).catch(()=>{})});return Promise.race([Promise.all(loads),new Promise(r=>setTimeout(r,2500))])};
 // V18.3: ABSOLUTE DIRECT CUT. No transition or transition layers in /output.
 // A newly received program replaces the previous composition in the same React commit.
 function Output(){
  const [scene,setScene]=useState(null);
  const versionRef=useRef(0);
+ const tokenRef=useRef(0);
  useEffect(()=>{
    let stopped=false;
    let fallback=null;
@@ -85,7 +87,10 @@ function Output(){
      const version=Number(payload.version)||0;
      if(version && version<=versionRef.current)return;
      if(version)versionRef.current=version;
-     setScene(payload.scene);
+     // V18.4: la escena anterior sigue visible hasta que las imágenes nuevas estén decodificadas.
+     // Es un corte directo (sin fade): evita el negro mientras se descarga la imagen.
+     const token=++tokenRef.current;
+     preloadScene(payload.scene).then(()=>{if(stopped||token!==tokenRef.current)return;setScene(payload.scene)});
    };
    const refresh=async()=>{try{
      const r=await fetch('/api/program',{cache:'no-store'});

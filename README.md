@@ -21,5 +21,8 @@ El cambio de escenas en `/output` es instantáneo: no hay fade, desvanecimiento,
 - **Prueba en una rama o instancia de Render independiente antes de sustituir producción.**
 
 
+## V18.4 - Anti-negro
+En /output la escena anterior permanece hasta que las imágenes nuevas se decodifican (corte directo, sin fade). Los archivos de /uploads ahora se cachean (nombres únicos), así que no se vuelven a descargar en cada cambio.
+
 ## V18.3 - Corte instantáneo, sin transiciones
 En `/output` se renderiza solamente la escena actual con `SceneRenderer`. No se usan fundidos, capas de transición, temporizadores de espera ni precarga. La recepción de órdenes se hace por SSE y GET de respaldo. Las fuentes nuevas (incluyendo VDO.Ninja) pueden tener latencia de carga propia.

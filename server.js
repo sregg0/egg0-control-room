@@ -239,7 +239,7 @@ const server = http.createServer((req, res) => {
     const full = path.join(uploadsDir, path.basename(f));
     if (!fs.existsSync(full)) { res.statusCode = 404; return res.end('Not found'); }
     const ext = path.extname(full).toLowerCase();
-    res.writeHead(200, { 'Content-Type':mime[ext] || 'application/octet-stream', 'Cache-Control':'no-store' });
+    res.writeHead(200, { 'Content-Type':mime[ext] || 'application/octet-stream', 'Cache-Control':'public, max-age=31536000, immutable' });
     return fs.createReadStream(full).pipe(res);
   }
 
