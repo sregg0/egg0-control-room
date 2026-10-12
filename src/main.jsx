@@ -79,31 +79,53 @@ const preloadScene=scene=>{const urls=[scene?.asset&&!isVideo(scene.asset)?scene
 // V18.4: los iframes de VDO.Ninja viven en un pool persistente. Un iframe movido en el DOM se recarga,
 // así que se mantienen montados (ocultos si no están al aire) y solo cambian de posición.
 
-// V18.5: panel de diagnóstico. Abre /output?debug=1 para ver si los iframes de VDO.Ninja se recrean.
+// V18.11: panel de diagnóstico. Abre /output?debug=1 para ver si los iframes de VDO.Ninja se recrean.
 const DBG=typeof location!=='undefined'&&new URLSearchParams(location.search).has('debug');
-const dbgLog=[],dbgStat={};
-const dlog=(label,msg,kind)=>{if(!DBG)return;const st=dbgStat[label]=dbgStat[label]||{mounts:0,loads:0,state:'—'};if(kind==='mount')st.mounts++;if(kind==='load')st.loads++;if(kind==='state')st.state=msg;dbgLog.unshift(`${(performance.now()/1000).toFixed(1)}s  ${label}: ${msg}`);dbgLog.length=Math.min(dbgLog.length,16)};
+const dbgLog=[],dbgStat={},dbgRefs={};
+const PARK=typeof location!=='undefined'?(new URLSearchParams(location.search).get('park')||''):'';
+const NOMUTE=typeof location!=='undefined'&&new URLSearchParams(location.search).has('nomute');
+const dlog=(label,msg,kind)=>{if(!DBG)return;const st=dbgStat[label]=dbgStat[label]||{mounts:0,loads:0,state:'—'};if(kind==='mount')st.mounts++;if(kind==='load')st.loads++;if(kind==='state')st.state=msg;dbgLog.unshift(`${(performance.now()/1000).toFixed(1)}s  ${label}: ${msg}`);dbgLog.length=Math.min(dbgLog.length,9)};
 function DebugPanel(){
- const [,tick]=useState(0);useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),500);return()=>clearInterval(t)},[]);
- return <pre style={{position:'fixed',left:6,top:6,zIndex:99999,margin:0,padding:8,background:'rgba(0,0,0,.82)',color:'#7CFFB2',font:'11px/1.35 ui-monospace,Consolas,monospace',maxWidth:'60vw',pointerEvents:'none',whiteSpace:'pre-wrap'}}>{`PÁGINA cargada hace ${(performance.now()/1000).toFixed(1)}s (si esto vuelve a 0 al cambiar de escena, OBS recarga la página)\n`}{Object.entries(dbgStat).map(([k,v])=>`${k}  montajes:${v.mounts}  cargas:${v.loads}  ${v.state}\n`).join('')}{'\n'}{dbgLog.join('\n')}</pre>;
+ const [,tick]=useState(0);const [show,setShow]=useState(true);useEffect(()=>{const t=setInterval(()=>tick(n=>n+1),500);const k=e=>{if(e.key==='d'||e.key==='D')setShow(v=>!v)};window.addEventListener('keydown',k);return()=>{clearInterval(t);window.removeEventListener('keydown',k)}},[]);
+ if(!show)return null;
+ return <pre style={{position:'fixed',left:6,bottom:6,zIndex:99999,margin:0,padding:6,background:'rgba(0,0,0,.85)',color:'#7CFFB2',font:'10px/1.3 ui-monospace,Consolas,monospace',maxWidth:'42vw',maxHeight:'45vh',overflow:'hidden',pointerEvents:'none',whiteSpace:'pre-wrap',wordBreak:'break-all'}}>{`PÁGINA hace ${(performance.now()/1000).toFixed(1)}s · modo park=${PARK||'normal'} · tecla D = ocultar\n`}{Object.entries(dbgStat).map(([k,v])=>{const el=dbgRefs[k]?.current;let g='';if(el){const b=el.getBoundingClientRect();g=`  caja:${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}x${Math.round(b.height)} op:${getComputedStyle(el).opacity} z:${getComputedStyle(el).zIndex}`}return `${k}  montajes:${v.mounts}  cargas:${v.loads}  ${v.state}${g}\n`+(v.stats?`   stats (hace ${((performance.now()-v.statsAt)/1000).toFixed(0)}s): ${v.stats}\n`:'')}).join('')}{'\n'}{dbgLog.join('\n')}</pre>;
 }
-function VdoFrame({src,geom}){
- const ref=useRef(null);const active=!!geom;
+function VdoFrame({src,geom,z}){
+ const ref=useRef(null),slotRef=useRef(null);const active=!!geom;
  const label=(()=>{try{const u=new URL(src);return u.searchParams.get('view')||u.searchParams.get('push')||u.searchParams.get('room')||src.slice(-14)}catch{return src.slice(-14)}})();
- useEffect(()=>{dlog(label,'MONTADO (iframe nuevo)','mount');return()=>dlog(label,'DESMONTADO')},[]);
+ useEffect(()=>{dlog(label,'MONTADO (iframe nuevo)','mount');if(DBG)dbgRefs[label]=slotRef;return()=>{dlog(label,'DESMONTADO');if(DBG&&dbgRefs[label]===slotRef)delete dbgRefs[label]}},[]);
+ useEffect(()=>{if(!DBG)return;const t=setInterval(()=>{try{const w=ref.current?.contentWindow;w?.postMessage({getStats:true},'*');w?.postMessage({getDetailedState:true},'*')}catch{}},2000);return()=>clearInterval(t)},[]);
+ useEffect(()=>{if(!DBG)return;let last='';const h=e=>{if(e.source!==ref.current?.contentWindow)return;const d=e.data;const act=d&&typeof d==='object'?String(d.action||Object.keys(d)[0]||''):'';let t='';try{t=JSON.stringify(d)}catch{t=String(d)}
+   // VDO.Ninja manda estadísticas cada segundo: se guardan en una sola línea en vez de llenar el log.
+   if(/^view-stats/.test(act))return;
+   if(/stats|detail/i.test(act)){const st=dbgStat[label]=dbgStat[label]||{mounts:0,loads:0,state:'—'};st.stats=t.slice(0,420);st.statsAt=performance.now();return}
+   if(t===last)return;last=t;dlog(label,'VDO: '+t.slice(0,110))};window.addEventListener('message',h);return()=>window.removeEventListener('message',h)},[]);
  useEffect(()=>{dlog(label,active?'AL AIRE (visible)':'OCULTO (precargado)','state')},[active]);
- const sendMute=()=>{try{ref.current?.contentWindow?.postMessage({mute:!active},'*')}catch{}};
+ const sendMute=()=>{if(NOMUTE)return;try{ref.current?.contentWindow?.postMessage({mute:!active},'*')}catch{}};
  useEffect(sendMute,[active]);
- const style=active?{left:`${geom.x/19.2}%`,top:`${geom.y/10.8}%`,width:`${geom.w/19.2}%`,height:`${geom.h/10.8}%`,opacity:1,zIndex:2}:{left:0,top:0,width:320,height:180,opacity:0,zIndex:1};
- return <div className="vdo-slot" style={style}><iframe ref={ref} src={src} onLoad={()=>{dlog(label,'iframe CARGADO (onload)','load');sendMute()}} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title="vdo" style={{pointerEvents:'none'}}/></div>;
+ const style=active?{left:`${geom.x/19.2}%`,top:`${geom.y/10.8}%`,width:`${geom.w/19.2}%`,height:`${geom.h/10.8}%`,opacity:1,zIndex:z}:PARK==='faint'?{left:0,top:0,width:320,height:180,opacity:.02,zIndex:z}:PARK==='tiny'?{left:0,top:0,width:16,height:9,opacity:1,zIndex:-1}:{left:0,top:0,width:'100%',height:'100%',opacity:1,zIndex:-1};
+ // V18.12: parqueado a tamaño completo (no 320x180) para que VDO.Ninja no baje resolución/fps al ocultarse.
+ // V18.11: oculto = opacidad 1 pero DETRÁS del fondo opaco de la escena (z-index negativo). Con opacity:0 Chrome congelaba el video.
+ return <div className="vdo-slot" ref={slotRef} style={style}><iframe ref={ref} src={src} onLoad={()=>{dlog(label,'iframe CARGADO (onload)','load');sendMute()}} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title="vdo" style={{pointerEvents:'none'}}/></div>;
 }
+// Evita que alguien pegue la URL de /output como "participante": se mostraría a sí misma sin fin.
+const isSelfOutput=k=>{try{const u=new URL(k);return u.origin===location.origin&&/^\/output\/?$/.test(u.pathname)}catch{return false}};
 function VdoPool({scene,preloadUrls}){
  const active=new Map();
- if(scene?.participantsEnabled)for(const g of scene.guests||[])if(g.visible&&g.mode!=='board'&&g.url){const k=normalizeVdo(g.url);if(!active.has(k))active.set(k,g)}
- const keys=[...new Set([...preloadUrls.map(normalizeVdo).filter(Boolean),...active.keys()])];
+ if(scene?.participantsEnabled)for(const g of scene.guests||[])if(g.visible&&g.mode!=='board'&&g.url){const k=normalizeVdo(g.url);if(!isSelfOutput(k)&&!active.has(k))active.set(k,g)}
+ // V18.11: los participantes de la escena anterior se quedan conectados (ocultos) un corte más,
+ // para poder volver a esa escena sin esperar a que VDO.Ninja se reconecte.
+ const hist=useRef({scene:null,activeKeys:[],kept:[]});
+ if(hist.current.scene!==scene)hist.current={scene,activeKeys:[...active.keys()],kept:hist.current.activeKeys};
+ const wanted=PARK==='none'?[...active.keys()]:[...new Set([...preloadUrls.map(normalizeVdo).filter(k=>k&&!isSelfOutput(k)),...active.keys(),...hist.current.kept])];
+ // V18.12: orden ESTABLE. Si cambia el orden de los hijos, React mueve el iframe en el DOM y el navegador lo recarga
+ // (VDO.Ninja se reconecta y la cámara se ve pegada/negra). Los nuevos se añaden al final y nunca se reordenan.
+ const order=useRef([]);
+ {const w=new Set(wanted);order.current=order.current.filter(k=>w.has(k));for(const k of wanted)if(!order.current.includes(k))order.current.push(k)}
+ const keys=order.current;
  const layers=Array.isArray(scene?.layers)?scene.layers:['background','media','participants'];
  const z=(layers.indexOf('participants')+1)||3;
- return <div className="vdo-pool" style={{zIndex:z}}>{keys.map(k=><VdoFrame key={k} src={k} geom={active.get(k)}/>)}</div>;
+ return <div className="vdo-pool">{keys.map(k=><VdoFrame key={k} src={k} geom={active.get(k)} z={z}/>)}</div>;
 }
 // V18.4: calienta caché/decodificación de archivos de la escena que se está preparando.
 const warmCache=new Map();
@@ -153,7 +175,8 @@ function Output(){
  </div>;
 }
 
-function PreloadPanel({profile,selectedScene,say,auto,setAuto}){
+function PreloadPanel({profile,selectedScene,say,mode,setMode}){
+ const auto=mode!=='manual';
  const [urls,setUrls]=useState([]);const ver=useRef(0),lastEdit=useRef(0);
  useEffect(()=>{let stopped=false;const pull=async()=>{try{const r=await fetch('/api/preload',{cache:'no-store'});const d=await r.json();if(stopped||!Array.isArray(d.urls))return;if(d.version!==ver.current&&Date.now()-lastEdit.current>1500){ver.current=d.version;setUrls(d.urls)}}catch{}};pull();const t=setInterval(pull,2500);return()=>{stopped=true;clearInterval(t)}},[]);
  const save=async next=>{const clean=[...new Set(next)];lastEdit.current=Date.now();setUrls(clean);try{const r=await fetch('/api/preload',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:clean})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Error');ver.current=d.version}catch(e){say(e.message||'No se pudo guardar la precarga')}};
@@ -165,8 +188,9 @@ function PreloadPanel({profile,selectedScene,say,auto,setAuto}){
  const on=u=>urls.some(x=>normalizeVdo(x)===u);
  const toggle=u=>save(on(u)?urls.filter(x=>normalizeVdo(x)!==u):[...urls,u]);
  return <section><div className="card"><h2>Precarga de participantes</h2><p className="muted">Los participantes precargados se mantienen conectados y ocultos dentro de <code>/output</code>. Al enviar una escena al aire solo cambian de posición: no se recargan y no aparece pantalla negra.</p>
- <label className="switchline"><input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)}/><span>Automático: precargar los participantes de la escena que seleccionas</span><b>{auto?'ACTIVADO':'MANUAL'}</b></label>
- <div className="row wrap" style={{marginTop:12}}><button className="primary" disabled={auto||!selectedScene} onClick={()=>{const add=guestsOf(selectedScene).map(g=>g.url);save([...urls,...add]);say(add.length?`Precargando ${add.length} participante(s) de “${selectedScene.name}”`:'Esa escena no tiene participantes con enlace')}}>Precargar escena seleccionada{selectedScene?` · ${selectedScene.name}`:''}</button><button disabled={auto} onClick={()=>save([...urls,...unique.map(u=>u.url)])}>Precargar todos del perfil</button><button className="danger" disabled={auto} onClick={()=>save([])}>Vaciar precarga</button></div><p className="hint">Activos: <b>{urls.length}</b>. {auto?'En modo automático la lista sigue a la escena seleccionada. ':''}Cada participante precargado consume ancho de banda y CPU en la PC de OBS.</p></div>
+ <div className="row wrap" style={{marginBottom:6}}>{[['always','Siempre cargados'],['auto','Automático (escena seleccionada)'],['manual','Manual']].map(([k,l])=><button key={k} className={mode===k?'primary':''} onClick={()=>setMode(k)}>{l}</button>)}</div>
+ <p className="hint">{mode==='always'?'Todos los participantes de las escenas con participantes de este perfil se mantienen conectados y ocultos en /output, estén o no en la escena seleccionada. Si un participante aparece en varias escenas, usa el mismo enlace para que cuente como una sola conexión.':mode==='auto'?'Solo se conectan los participantes de la escena que tienes seleccionada.':'Tú eliges qué participantes se precargan.'}</p>
+ <div className="row wrap" style={{marginTop:12}}><button className="primary" disabled={auto||!selectedScene} onClick={()=>{const add=guestsOf(selectedScene).map(g=>g.url);save([...urls,...add]);say(add.length?`Precargando ${add.length} participante(s) de “${selectedScene.name}”`:'Esa escena no tiene participantes con enlace')}}>Precargar escena seleccionada{selectedScene?` · ${selectedScene.name}`:''}</button><button disabled={auto} onClick={()=>save([...urls,...unique.map(u=>u.url)])}>Precargar todos del perfil</button><button className="danger" disabled={auto} onClick={()=>save([])}>Vaciar precarga</button></div><p className="hint">Activos: <b>{urls.length}</b>. {auto?'La lista la gestiona el modo seleccionado. ':''}Cada participante precargado consume ancho de banda y CPU en la PC de OBS.</p></div>
  <div className="card"><h2>Participantes del perfil — {profile?.name}</h2><div className="source-list">{unique.map(u=><label key={u.url} className="check preload-row"><input type="checkbox" disabled={auto} checked={on(u.url)} onChange={()=>toggle(u.url)}/><span><b>{u.name||'Participante'}</b><small style={{display:'block',color:'#817c88'}}>{u.scenes.join(' · ')}</small></span><em className={on(u.url)?'preload-on':'preload-off'}>{on(u.url)?'PRECARGADO':'—'}</em></label>)}{!unique.length&&<p className="muted">Ninguna escena de este perfil tiene participantes con enlace VDO.Ninja.</p>}</div></div>
  {others.length>0&&<div className="card"><h2>Otros enlaces precargados</h2><div className="source-list">{others.map(u=><div key={u}><code style={{wordBreak:'break-all',fontSize:11}}>{u}</code><button disabled={auto} onClick={()=>save(urls.filter(x=>x!==u))}>Quitar</button></div>)}</div></div>}</section>;
 }
@@ -250,13 +274,17 @@ function App(){
  useEffect(()=>{fetch('/api/health',{cache:'no-store'}).then(r=>r.json()).then(d=>setBridgeOk(!!d?.ok)).catch(()=>setBridgeOk(false));fetch('/api/program',{cache:'no-store'}).then(r=>r.json()).then(d=>setLiveName(d?.scene?.name||'—')).catch(()=>{})},[]);
  useEffect(()=>{const close=()=>{setConnected(false);setObsStatus('Desconectado')};obs.on('ConnectionClosed',close);return()=>obs.removeAllListeners()},[]);
  const say=m=>{setNotice(m);setTimeout(()=>setNotice(''),3200)};
- const [autoPreload,setAutoPreload]=useState(()=>load('autoPreload',true));
- useEffect(()=>{try{localStorage.setItem('autoPreload',JSON.stringify(autoPreload))}catch{}},[autoPreload]);
- // V18.4: al seleccionar una escena (antes de enviarla), /output ya calienta sus archivos y conecta sus participantes.
+ const [preloadMode,setPreloadMode]=useState(()=>{const m=load('preloadMode','always');return['always','auto','manual'].includes(m)?m:'always'});
+ useEffect(()=>{try{localStorage.setItem('preloadMode',JSON.stringify(preloadMode))}catch{}},[preloadMode]);
+ // V18.11: al seleccionar una escena (antes de enviarla), /output ya calienta sus archivos.
  const warmKey=[scene?.asset?.url,scene?.background?.url].filter(Boolean).join('|');
  useEffect(()=>{if(!warmKey)return;const t=setTimeout(()=>fetch('/api/warm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assets:warmKey.split('|')})}).catch(()=>{}),250);return()=>clearTimeout(t)},[scene?.id,warmKey]);
- const preloadKey=scene&&scene.participantsEnabled?[...new Set((scene.guests||[]).filter(g=>g.visible&&g.url&&g.mode!=='board').map(g=>normalizeVdo(g.url)))].join('\n'):'';
- useEffect(()=>{if(!autoPreload||!scene)return;const t=setTimeout(()=>fetch('/api/preload',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:preloadKey?preloadKey.split('\n'):[]})}).catch(()=>{}),500);return()=>clearTimeout(t)},[autoPreload,scene?.id,preloadKey]);
+ const guestUrls=sc=>(sc.guests||[]).filter(g=>g.url&&g.mode!=='board').map(g=>normalizeVdo(g.url)).filter(k=>!isSelfOutput(k));
+ const preloadKey=scene&&scene.participantsEnabled?[...new Set(guestUrls(scene))].join('\n'):'';
+ const alwaysKey=[...new Set((profile?.scenes||[]).filter(sc=>sc.participantsEnabled).flatMap(guestUrls))].slice(0,40).join('\n');
+ // 'always': todos los participantes del perfil siempre conectados · 'auto': solo los de la escena seleccionada · 'manual': lo decides tú
+ const wantKey=preloadMode==='always'?(studioReady&&profile?alwaysKey:null):preloadMode==='auto'?(scene?preloadKey:null):null;
+ useEffect(()=>{if(wantKey===null)return;const t=setTimeout(()=>fetch('/api/preload',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:wantKey?wantKey.split('\n'):[]})}).catch(()=>{}),500);return()=>clearTimeout(t)},[wantKey]);
  const patchScene=(id,p)=>{setScenes(v=>v.map(s=>s.id===id?{...s,...p}:s));setDirty(true)};
  const selectScene=id=>{choose(profile.id,id);setTab('Perfiles')};
  const addProfile=()=>{const name=window.prompt('Nombre del perfil','Nuevo perfil');if(!name?.trim())return;const id=uid();updateProfiles(v=>[...v,{id,name:name.trim(),scenes:[mediaScene('NUEVA ESCENA',true)]}]);choose(id,'');};
@@ -277,7 +305,7 @@ function App(){
  const audio=useMemo(()=>inputs.filter(i=>/audio|mic|desktop|capture|browser|ffmpeg/i.test(i.inputKind||'')),[inputs]);
 
  return <div className="app">
-   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.4</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
+   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.11</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
    {notice&&<div className="notice">{notice}</div>}
    <nav>{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</nav>
 
@@ -292,7 +320,7 @@ function App(){
      {scene&&<div className="card editor-card"><div className="scene-head"><label className="name-edit">Nombre de la escena<input value={scene.name} onChange={e=>patchScene(scene.id,{name:e.target.value})}/></label><div className="row"><button onClick={()=>moveScene(scene.id,-1)}>← Mover</button><button onClick={()=>moveScene(scene.id,1)}>Mover →</button><button onClick={duplicateScene}>Duplicar escena</button><button className="danger" onClick={()=>removeScene(scene.id)}>Eliminar</button></div></div><MediaEditor scene={scene} patch={p=>patchScene(scene.id,p)} onFile={f=>setMedia(scene,f)}/><LayerEditor scene={scene} patch={p=>patchScene(scene.id,p)}/><div className="participants-toggle-row"><label className="switchline"><input type="checkbox" checked={!!scene.participantsEnabled} onChange={e=>patchScene(scene.id,{participantsEnabled:e.target.checked})}/><span>Participantes en esta escena</span><b>{scene.participantsEnabled?'ACTIVADOS':'DESACTIVADOS'}</b></label></div>{scene.participantsEnabled&&<ParticipantsEditor scene={scene} patch={p=>patchScene(scene.id,p)} onBackground={f=>setBackground(scene,f)} onMode={(guestId,mode)=>fetch('/api/program/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sceneId:scene.id,guestId,mode})}).catch(()=>{})}/>}</div>}
    </section>}
 
-   {tab==='Precarga'&&<PreloadPanel profile={profile} selectedScene={scene} say={say} auto={autoPreload} setAuto={setAutoPreload}/>}
+   {tab==='Precarga'&&<PreloadPanel profile={profile} selectedScene={scene} say={say} mode={preloadMode} setMode={setPreloadMode}/>}
    {tab==='Audio'&&<section><div className="card"><h2>Mezclador rápido de OBS</h2><p className="muted">Conecta WebSocket en Configuración. Esta función solo controla audio; no toca escenas de OBS.</p><div className="scene-grid">{audio.map(i=><button className="scene" key={i.inputName} disabled={!connected} onClick={()=>toggleMute(i.inputName)}>🎚 {i.inputName}</button>)}</div></div></section>}
    {tab==='Fuentes'&&<section><div className="card"><h2>Fuentes detectadas en OBS</h2><p className="muted">Solo lectura.</p><div className="source-list">{inputs.map(i=><div key={i.inputName}><b>{i.inputName}</b><span>{i.inputKind}</span></div>)}</div></div></section>}
    {tab==='Configuración'&&<section><div className="card settings"><h2>OBS WebSocket (opcional)</h2><p className="muted">Conexión directa desde este navegador a OBS. La dirección 127.0.0.1 solo funciona desde la misma PC donde está OBS; el control remoto del staff se configurará en un paso posterior.</p><label>Servidor<input value={host} onChange={e=>setHost(e.target.value)} placeholder="ws://127.0.0.1:4455"/></label><label>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><div className="row"><button className="primary" onClick={connectObs}>Conectar a OBS</button><span>{obsStatus}</span></div><hr/><h2>Fuente de navegador</h2><div className="output-info"><code>{outputUrl}</code><p className="muted">Ancho 1920 · Alto 1080</p></div></div></section>}

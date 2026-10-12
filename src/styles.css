@@ -47,8 +47,8 @@
 .output-mode .p-guest{background:transparent}
 
 /* V18.4: pool persistente de VDO.Ninja en /output */
-.vdo-pool{position:absolute;inset:0;overflow:hidden;pointer-events:none}
-.vdo-slot{position:absolute;overflow:hidden;background:transparent}
+.vdo-pool{display:contents}
+.vdo-slot{position:absolute;overflow:hidden;background:transparent;pointer-events:none}
 .vdo-slot iframe{width:100%;height:100%;border:0;display:block;background:transparent}
 .preload-row{padding:11px;background:#0e0d12;border:1px solid #29262f;border-radius:7px;gap:10px!important}
 .preload-row em{margin-left:auto;font-style:normal;font-size:10px;font-weight:800}
