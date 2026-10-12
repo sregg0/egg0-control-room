@@ -26,3 +26,12 @@ Abrir `http://localhost:5173`; salida `http://localhost:5173/output`.
 
 ## Publicación
 Antes de cambiar la rama `main`, probar esta versión en una rama nueva / servicio de staging. Hacer copia de seguridad del repositorio y del estado de producción. La integración con el sistema de acceso ya existente debe revisarse por separado.
+
+
+## V17 TV TAKE (PRUEBA)
+
+- `/output` conserva el lienzo anterior hasta montar el siguiente, luego aplica un crossfade de 350 ms (ajustable desde Perfiles).
+- Las cámaras y pizarras se funden con la composición; no se interpolan geometrías de cámaras durante el cambio.
+- Se añade un margen de arranque de 1,4 s para nuevas cámaras, que **no garantiza** que WebRTC tenga imagen. Probar con fuentes VDO.Ninja reales antes de producción.
+- El nuevo montaje puede mantener dos reproducciones de la cámara durante la transición. Revisar audio/eco en OBS.
+- El ZIP es experimental: no se pudo ejecutar `npm run build` en este entorno por dependencias npm no disponibles.

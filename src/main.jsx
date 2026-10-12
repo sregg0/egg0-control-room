@@ -67,18 +67,46 @@ function ParticipantsOutput({scene,interactive=false}){
    {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
  </div>;
 }
+// V17 TV TRANSITIONS: Prepare the incoming *whole* scene off-air and crossfade
+// complete scene canvases. Never animate individual cameras across scene cuts.
 function Output(){
- const [live,setLive]=useState({scene:null,fadeMs:350,version:0});
- const [prev,setPrev]=useState(null);
+ const [program,setProgram]=useState({scene:null,fadeMs:350,version:0});
+ const [incoming,setIncoming]=useState(null);
  const [preloadScenes,setPreloadScenes]=useState([]);
- const liveRef=useRef(live),timer=useRef(),lastVersion=useRef(-1);
- const apply=n=>{const next=n||{scene:null,fadeMs:350,version:0};if(Number(next.version||0)===Number(lastVersion.current))return;lastVersion.current=Number(next.version||0);const ms=clamp(next.fadeMs??350,0,3000);setPrev(liveRef.current);liveRef.current=next;setLive(next);clearTimeout(timer.current);timer.current=setTimeout(()=>setPrev(null),ms+140)};
- useEffect(()=>{let stopped=false,pollProgram,pollPreload;const tickProgram=async()=>{try{const r=await fetch(`/api/program?t=${Date.now()}`,{cache:'no-store'});if(r.ok){const d=await r.json();if(!stopped)apply(d)}}catch{};if(!stopped)pollProgram=setTimeout(tickProgram,250)};const tickPreload=async()=>{try{const r=await fetch(`/api/preload?t=${Date.now()}`,{cache:'no-store'});if(r.ok){const d=await r.json();if(!stopped&&Array.isArray(d?.scenes))setPreloadScenes(d.scenes)}}catch{};if(!stopped)pollPreload=setTimeout(tickPreload,700)};tickProgram();tickPreload();return()=>{stopped=true;clearTimeout(pollProgram);clearTimeout(pollPreload);clearTimeout(timer.current)}},[]);
- const scene=live?.scene;
+ const [fadeStarted,setFadeStarted]=useState(false);
+ const programRef=useRef(program),incomingRef=useRef(null),lastVersion=useRef(-1);
+ const timer=useRef(null),commitTimer=useRef(null);
+ const incomingRefSet=n=>{incomingRef.current=n;setIncoming(n)};
+ const apply=n=>{
+   const next=n||{scene:null,fadeMs:350,version:0};
+   if(Number(next.version||0)===Number(lastVersion.current))return;
+   lastVersion.current=Number(next.version||0);
+   clearTimeout(timer.current);clearTimeout(commitTimer.current);
+   // A new TAKE during a transition replaces the queued target; the on-air
+   // program always remains visible until the next target has been staged.
+   if(!programRef.current?.scene){programRef.current=next;setProgram(next);incomingRefSet(null);return}
+   incomingRefSet(next);setFadeStarted(false);
+   // Let the incoming browser/media sources mount while completely hidden.
+   // This is a readiness buffer, NOT proof that all WebRTC frames are ready.
+   const hasCamera=!!next.scene?.participantsEnabled&&(next.scene.guests||[]).some(g=>g.visible&&g.mode!=='board'&&g.url);
+   const wait=hasCamera?1400:120;
+   timer.current=setTimeout(()=>{
+     if(incomingRef.current!==next)return;
+     setFadeStarted(true);
+     const duration=clamp(next.fadeMs??350,0,3000);
+     commitTimer.current=setTimeout(()=>{programRef.current=next;setProgram(next);incomingRefSet(null);setFadeStarted(false)},duration+90);
+   },wait);
+ };
+ useEffect(()=>{let stopped=false,pollProgram,pollPreload;
+  const tickProgram=async()=>{try{const r=await fetch(`/api/program?t=${Date.now()}`,{cache:'no-store'});if(r.ok){const d=await r.json();if(!stopped)apply(d)}}catch{};if(!stopped)pollProgram=setTimeout(tickProgram,250)};
+  const tickPreload=async()=>{try{const r=await fetch(`/api/preload?t=${Date.now()}`,{cache:'no-store'});if(r.ok){const d=await r.json();if(!stopped&&Array.isArray(d?.scenes))setPreloadScenes(d.scenes)}}catch{};if(!stopped)pollPreload=setTimeout(tickPreload,700)};
+  tickProgram();tickPreload();return()=>{stopped=true;clearTimeout(pollProgram);clearTimeout(pollPreload);clearTimeout(timer.current);clearTimeout(commitTimer.current)}
+ },[]);
+ const duration=clamp(incoming?.fadeMs??350,0,3000);
  return <div className="program-root persistent-output">
    <MediaPreloader scenes={preloadScenes}/>
-   <PersistentCurrentCanvas scenes={preloadScenes} scene={scene} fadeMs={live?.fadeMs??350}/>
-   {prev?.scene&&<div className="persistent-visual leaving" style={{'--fade':`${clamp(live?.fadeMs??350,0,3000)}ms`}}><SceneVisualOnly scene={prev.scene}/></div>}
+   <div className="tv-scene tv-onair"><PersistentCurrentCanvas scenes={[]} scene={program?.scene} fadeMs={0}/></div>
+   {incoming?.scene&&<div className={`tv-scene tv-incoming ${fadeStarted?'tv-take':''}`} style={{'--tv-duration':`${duration}ms`}}><PersistentCurrentCanvas scenes={[]} scene={incoming.scene} fadeMs={0}/></div>}
  </div>;
 }
 function PersistentCurrentCanvas({scenes,scene,fadeMs}){
