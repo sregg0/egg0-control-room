@@ -11,17 +11,28 @@ fs.mkdirSync(uploadsDir, { recursive: true });
 const stateFile = path.join(__dirname, '.program-state.json');
 const studioFile = path.join(__dirname, '.studio-state.json');
 const boardsFile = path.join(__dirname, '.board-state.json');
+const preloadFile = path.join(__dirname, '.preload-state.json');
 const readJSON=(f,defaultValue)=>{try{return JSON.parse(fs.readFileSync(f,'utf8'))}catch{return defaultValue}};
 const saveJSON=(f,value)=>{try{fs.writeFileSync(f,JSON.stringify(value));return true}catch(e){console.error('No se pudo guardar',f,e.message);return false}};
 let studio=readJSON(studioFile,{profiles:[],version:0});
 let selection={profileId:'',sceneId:'',version:0};
 let boards=readJSON(boardsFile,{});
+// V18.4: enlaces VDO.Ninja que /output mantiene cargados aunque no estén al aire.
+let preload=readJSON(preloadFile,{urls:[],version:0});
+if(!preload||!Array.isArray(preload.urls))preload={urls:[],version:0};
 // Real-time ephemeral pen strokes; completed strokes still persist through PUT.
 const liveBoards = new Map();
 const boardStreams = new Map();
 const programClients = new Set();
 function broadcastProgram() {
   const message = `event: program\ndata: ${JSON.stringify(program)}\n\n`;
+  for (const res of programClients) {
+    try { res.write(message); } catch { programClients.delete(res); }
+  }
+}
+
+function broadcastEvent(name, data) {
+  const message = `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of programClients) {
     try { res.write(message); } catch { programClients.delete(res); }
   }
@@ -142,7 +153,7 @@ const server = http.createServer((req, res) => {
     return json(res,405,{error:'Método no permitido'});
   }
 
-  if (pathname === '/api/health') return json(res, 200, { ok:true, version:"18.1", mode:'persistent-output', programVersion:program.version || 0 });
+  if (pathname === '/api/health') return json(res, 200, { ok:true, version:"18.4", mode:'persistent-output', programVersion:program.version || 0 });
 
 
   if(pathname==='/api/program/mode'&&req.method==='POST')return bodyJSON(req,res,next=>{
@@ -154,6 +165,20 @@ const server = http.createServer((req, res) => {
     return json(res,200,{ok:true,updated:true,version:program.version});
   });
 
+  if(pathname==='/api/preload'&&req.method==='GET')return json(res,200,preload);
+  if(pathname==='/api/preload'&&req.method==='PUT')return bodyJSON(req,res,next=>{
+    if(!Array.isArray(next.urls)||next.urls.length>40||next.urls.some(x=>typeof x!=='string'||x.length>2000))return json(res,400,{error:'Lista de precarga inválida'});
+    preload={urls:[...new Set(next.urls.map(x=>x.trim()).filter(Boolean))],version:Date.now()};
+    saveJSON(preloadFile,preload);broadcastEvent('preload',preload);
+    return json(res,200,{ok:true,...preload});
+  });
+  // Calienta la caché de /output con los archivos de la escena que el operador está preparando.
+  if(pathname==='/api/warm'&&req.method==='POST')return bodyJSON(req,res,next=>{
+    if(!Array.isArray(next.assets)||next.assets.length>12||next.assets.some(x=>typeof x!=='string'||x.length>2000||!/^(\/uploads\/|https?:\/\/)/.test(x)))return json(res,400,{error:'Lista inválida'});
+    broadcastEvent('warm',{assets:next.assets});
+    return json(res,200,{ok:true});
+  });
+
   // Persistent push channel: no 250ms polling delay between a TAKE and /output.
   if (pathname === '/api/program/events' && req.method === 'GET') {
     res.writeHead(200, {
@@ -162,7 +187,9 @@ const server = http.createServer((req, res) => {
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no'
     });
+    req.socket.setNoDelay(true);
     res.write(`event: program\ndata: ${JSON.stringify(program)}\n\n`);
+    res.write(`event: preload\ndata: ${JSON.stringify(preload)}\n\n`);
     programClients.add(res);
     const heartbeat = setInterval(() => { try { res.write(': keepalive\n\n'); } catch {} }, 15000);
     req.on('close', () => { clearInterval(heartbeat); programClients.delete(res); });
@@ -193,9 +220,8 @@ const server = http.createServer((req, res) => {
           version: Number(next.version) || Date.now()
         };
         // Persistir es útil, pero NUNCA debe impedir mandar al aire.
-        try { fs.writeFileSync(stateFile, JSON.stringify(program)); }
-        catch (e) { console.warn('[V18.1] No se pudo guardar .program-state.json:', e.message); }
         broadcastProgram();
+        fs.writeFile(stateFile, JSON.stringify(program), err => { if (err) console.warn('[V18.4] No se pudo guardar .program-state.json:', err.message); });
         console.log(`[V18.1] AL AIRE -> ${program.scene?.name || 'SIN ESCENA'} | version ${program.version}`);
         return json(res, 200, { ok:true, version:program.version, sceneName:program.scene?.name || null });
       } catch (e) {

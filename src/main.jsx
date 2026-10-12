@@ -48,7 +48,7 @@ async function publish(state){
 
 function isVideo(asset){return !!asset&&(((asset.type||'').startsWith('video/'))||/\.(mp4|webm|mov|m4v)$/i.test(asset.url||''));}
 
-function SceneRenderer({scene,interactive=false}){
+function SceneRenderer({scene,interactive=false,externalVdo=false}){
  if(!scene)return <div className="empty-program"><span>Sin escena</span></div>;
  // scene.layers is stored BACK -> FRONT. Higher index = visually in front.
  const layers=Array.isArray(scene.layers)?scene.layers:['background','media','participants'];
@@ -60,24 +60,53 @@ function SceneRenderer({scene,interactive=false}){
      const a=scene.asset;
      return a?(isVideo(a)?<video key={`media-${a.url}`} className={`media ${scene.fit||'cover'}`} style={layerStyle} src={a.url} autoPlay playsInline loop={scene.loop!==false} muted={scene.muted!==false} controls={interactive}/>:<img key={`media-${a.url}`} className={`media ${scene.fit||'cover'}`} style={layerStyle} src={a.url} alt=""/>):null;
    }
-   if(key==='participants') return hasParticipants?<div key="participants-layer" className="participants-layer" style={layerStyle}><ParticipantsOutput scene={{...scene,background:null}} interactive={interactive}/></div>:null;
+   if(key==='participants') return hasParticipants?<div key="participants-layer" className="participants-layer" style={layerStyle}><ParticipantsOutput scene={{...scene,background:null}} interactive={interactive} externalVdo={externalVdo}/></div>:null;
    return null;
  };
  const anyVisual=!!scene.asset||!!scene.background?.url||hasParticipants;
  return <div className="scene-composite">{layers.map(renderLayer)}{!anyVisual&&<div className="empty-program"><span>{scene.name}<small>Carga un archivo para ver el preview</small></span></div>}</div>;
 }
-function ParticipantsOutput({scene,interactive=false}){
+function ParticipantsOutput({scene,interactive=false,externalVdo=false}){
  return <div className="participants-output">
    {scene.background?.url&&<img className="p-bg" src={scene.background.url} alt="" style={{opacity:clamp(scene.bgOpacity??35,0,100)/100}}/>}
-   {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
+   {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url&&!externalVdo?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
  </div>;
 }
 const preloadScene=scene=>{const urls=[scene?.asset&&!isVideo(scene.asset)?scene.asset.url:null,scene?.background?.url].filter(Boolean);if(!urls.length)return Promise.resolve();const loads=urls.map(u=>{const i=new Image();i.src=u;return(i.decode?i.decode():Promise.resolve()).catch(()=>{})});return Promise.race([Promise.all(loads),new Promise(r=>setTimeout(r,2500))])};
 // V18.3: ABSOLUTE DIRECT CUT. No transition or transition layers in /output.
 // A newly received program replaces the previous composition in the same React commit.
+
+// V18.4: los iframes de VDO.Ninja viven en un pool persistente. Un iframe movido en el DOM se recarga,
+// así que se mantienen montados (ocultos si no están al aire) y solo cambian de posición.
+function VdoFrame({src,geom}){
+ const ref=useRef(null);const active=!!geom;
+ const sendMute=()=>{try{ref.current?.contentWindow?.postMessage({mute:!active},'*')}catch{}};
+ useEffect(sendMute,[active]);
+ const style=active?{left:`${geom.x/19.2}%`,top:`${geom.y/10.8}%`,width:`${geom.w/19.2}%`,height:`${geom.h/10.8}%`,opacity:1,zIndex:2}:{left:0,top:0,width:320,height:180,opacity:0,zIndex:1};
+ return <div className="vdo-slot" style={style}><iframe ref={ref} src={src} onLoad={sendMute} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title="vdo" style={{pointerEvents:'none'}}/></div>;
+}
+function VdoPool({scene,preloadUrls}){
+ const active=new Map();
+ if(scene?.participantsEnabled)for(const g of scene.guests||[])if(g.visible&&g.mode!=='board'&&g.url){const k=normalizeVdo(g.url);if(!active.has(k))active.set(k,g)}
+ const keys=[...new Set([...preloadUrls.map(normalizeVdo).filter(Boolean),...active.keys()])];
+ const layers=Array.isArray(scene?.layers)?scene.layers:['background','media','participants'];
+ const z=(layers.indexOf('participants')+1)||3;
+ return <div className="vdo-pool" style={{zIndex:z}}>{keys.map(k=><VdoFrame key={k} src={k} geom={active.get(k)}/>)}</div>;
+}
+// V18.4: calienta caché/decodificación de archivos de la escena que se está preparando.
+const warmCache=new Map();
+function warmAsset(u){
+ if(!u||warmCache.has(u))return;
+ let el;
+ if(/\.(mp4|webm|mov|m4v)(\?|$)/i.test(u)){el=document.createElement('video');el.preload='auto';el.muted=true;el.src=u;el.load()}
+ else{el=new Image();el.src=u;if(el.decode)el.decode().catch(()=>{})}
+ warmCache.set(u,el);
+ if(warmCache.size>16){const k=warmCache.keys().next().value;const old=warmCache.get(k);if(old?.tagName==='VIDEO'){old.removeAttribute('src');old.load()}warmCache.delete(k)}
+}
 function Output(){
  const [scene,setScene]=useState(null);
  const versionRef=useRef(0);
+ const [preloadUrls,setPreloadUrls]=useState([]);
  const tokenRef=useRef(0);
  useEffect(()=>{
    let stopped=false;
@@ -97,14 +126,36 @@ function Output(){
      if(r.ok)accept(await r.json());
    }catch{}};
    refresh();
+   fetch('/api/preload',{cache:'no-store'}).then(r=>r.json()).then(d=>{if(!stopped&&Array.isArray(d.urls))setPreloadUrls(d.urls)}).catch(()=>{});
    const stream=new EventSource('/api/program/events');
+   stream.addEventListener('preload',e=>{try{const d=JSON.parse(e.data);if(Array.isArray(d.urls))setPreloadUrls(d.urls)}catch{}});
+   stream.addEventListener('warm',e=>{try{for(const u of JSON.parse(e.data).assets||[])warmAsset(u)}catch{}});
    stream.addEventListener('program',e=>{try{accept(JSON.parse(e.data))}catch{}});
    stream.onerror=()=>{if(!fallback)fallback=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1500)};
    return()=>{stopped=true;stream.close();if(fallback)clearInterval(fallback)};
  },[]);
  return <div className="program-root output-direct-cut">
-   {scene?<SceneRenderer scene={scene}/>:<div className="empty-program"><span>Sin escena</span></div>}
+   {scene?<SceneRenderer scene={scene} externalVdo/>:<div className="empty-program"><span>Sin escena</span></div>}
+   <VdoPool scene={scene} preloadUrls={preloadUrls}/>
  </div>;
+}
+
+function PreloadPanel({profile,selectedScene,say,auto,setAuto}){
+ const [urls,setUrls]=useState([]);const ver=useRef(0),lastEdit=useRef(0);
+ useEffect(()=>{let stopped=false;const pull=async()=>{try{const r=await fetch('/api/preload',{cache:'no-store'});const d=await r.json();if(stopped||!Array.isArray(d.urls))return;if(d.version!==ver.current&&Date.now()-lastEdit.current>1500){ver.current=d.version;setUrls(d.urls)}}catch{}};pull();const t=setInterval(pull,2500);return()=>{stopped=true;clearInterval(t)}},[]);
+ const save=async next=>{const clean=[...new Set(next)];lastEdit.current=Date.now();setUrls(clean);try{const r=await fetch('/api/preload',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:clean})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Error');ver.current=d.version}catch(e){say(e.message||'No se pudo guardar la precarga')}};
+ const guestsOf=sc=>(sc.guests||[]).filter(g=>g.url&&g.mode!=='board').map(g=>({name:g.name,url:normalizeVdo(g.url),scene:sc.name}));
+ const all=(profile?.scenes||[]).flatMap(guestsOf);
+ const unique=[];for(const g of all){const f=unique.find(u=>u.url===g.url);if(f)f.scenes.push(g.scene);else unique.push({...g,scenes:[g.scene]})}
+ const known=new Set(unique.map(u=>u.url));
+ const others=urls.filter(u=>!known.has(normalizeVdo(u)));
+ const on=u=>urls.some(x=>normalizeVdo(x)===u);
+ const toggle=u=>save(on(u)?urls.filter(x=>normalizeVdo(x)!==u):[...urls,u]);
+ return <section><div className="card"><h2>Precarga de participantes</h2><p className="muted">Los participantes precargados se mantienen conectados y ocultos dentro de <code>/output</code>. Al enviar una escena al aire solo cambian de posición: no se recargan y no aparece pantalla negra.</p>
+ <label className="switchline"><input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)}/><span>Automático: precargar los participantes de la escena que seleccionas</span><b>{auto?'ACTIVADO':'MANUAL'}</b></label>
+ <div className="row wrap" style={{marginTop:12}}><button className="primary" disabled={auto||!selectedScene} onClick={()=>{const add=guestsOf(selectedScene).map(g=>g.url);save([...urls,...add]);say(add.length?`Precargando ${add.length} participante(s) de “${selectedScene.name}”`:'Esa escena no tiene participantes con enlace')}}>Precargar escena seleccionada{selectedScene?` · ${selectedScene.name}`:''}</button><button disabled={auto} onClick={()=>save([...urls,...unique.map(u=>u.url)])}>Precargar todos del perfil</button><button className="danger" disabled={auto} onClick={()=>save([])}>Vaciar precarga</button></div><p className="hint">Activos: <b>{urls.length}</b>. {auto?'En modo automático la lista sigue a la escena seleccionada. ':''}Cada participante precargado consume ancho de banda y CPU en la PC de OBS.</p></div>
+ <div className="card"><h2>Participantes del perfil — {profile?.name}</h2><div className="source-list">{unique.map(u=><label key={u.url} className="check preload-row"><input type="checkbox" disabled={auto} checked={on(u.url)} onChange={()=>toggle(u.url)}/><span><b>{u.name||'Participante'}</b><small style={{display:'block',color:'#817c88'}}>{u.scenes.join(' · ')}</small></span><em className={on(u.url)?'preload-on':'preload-off'}>{on(u.url)?'PRECARGADO':'—'}</em></label>)}{!unique.length&&<p className="muted">Ninguna escena de este perfil tiene participantes con enlace VDO.Ninja.</p>}</div></div>
+ {others.length>0&&<div className="card"><h2>Otros enlaces precargados</h2><div className="source-list">{others.map(u=><div key={u}><code style={{wordBreak:'break-all',fontSize:11}}>{u}</code><button disabled={auto} onClick={()=>save(urls.filter(x=>x!==u))}>Quitar</button></div>)}</div></div>}</section>;
 }
 function BoardCanvas({strokes,working,background='#ffffff'}){
  const ref=useRef(null);
@@ -157,7 +208,7 @@ function App(){
  const [password,setPassword]=useState(localStorage.getItem('obsPassword')||'');
  const [connected,setConnected]=useState(false),[obsStatus,setObsStatus]=useState('Desconectado');
  const [streaming,setStreaming]=useState(false),[recording,setRecording]=useState(false),[inputs,setInputs]=useState([]);
- const tabs=['En vivo','Perfiles','Audio','Fuentes','Configuración'];
+ const tabs=['En vivo','Precarga','Perfiles','Audio','Fuentes','Configuración'];
  const scene=scenes.find(s=>s.id===selected)||scenes[0];
 
  useEffect(()=>localStorage.setItem('v17SelectedProfile',profile?.id||''),[profile?.id]);
@@ -186,6 +237,13 @@ function App(){
  useEffect(()=>{fetch('/api/health',{cache:'no-store'}).then(r=>r.json()).then(d=>setBridgeOk(!!d?.ok)).catch(()=>setBridgeOk(false));fetch('/api/program',{cache:'no-store'}).then(r=>r.json()).then(d=>setLiveName(d?.scene?.name||'—')).catch(()=>{})},[]);
  useEffect(()=>{const close=()=>{setConnected(false);setObsStatus('Desconectado')};obs.on('ConnectionClosed',close);return()=>obs.removeAllListeners()},[]);
  const say=m=>{setNotice(m);setTimeout(()=>setNotice(''),3200)};
+ const [autoPreload,setAutoPreload]=useState(()=>load('autoPreload',true));
+ useEffect(()=>{try{localStorage.setItem('autoPreload',JSON.stringify(autoPreload))}catch{}},[autoPreload]);
+ // V18.4: al seleccionar una escena (antes de enviarla), /output ya calienta sus archivos y conecta sus participantes.
+ const warmKey=[scene?.asset?.url,scene?.background?.url].filter(Boolean).join('|');
+ useEffect(()=>{if(!warmKey)return;const t=setTimeout(()=>fetch('/api/warm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assets:warmKey.split('|')})}).catch(()=>{}),250);return()=>clearTimeout(t)},[scene?.id,warmKey]);
+ const preloadKey=scene&&scene.participantsEnabled?[...new Set((scene.guests||[]).filter(g=>g.visible&&g.url&&g.mode!=='board').map(g=>normalizeVdo(g.url)))].join('\n'):'';
+ useEffect(()=>{if(!autoPreload||!scene)return;const t=setTimeout(()=>fetch('/api/preload',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls:preloadKey?preloadKey.split('\n'):[]})}).catch(()=>{}),500);return()=>clearTimeout(t)},[autoPreload,scene?.id,preloadKey]);
  const patchScene=(id,p)=>{setScenes(v=>v.map(s=>s.id===id?{...s,...p}:s));setDirty(true)};
  const selectScene=id=>{choose(profile.id,id);setTab('Perfiles')};
  const addProfile=()=>{const name=window.prompt('Nombre del perfil','Nuevo perfil');if(!name?.trim())return;const id=uid();updateProfiles(v=>[...v,{id,name:name.trim(),scenes:[mediaScene('NUEVA ESCENA',true)]}]);choose(id,'');};
@@ -206,7 +264,7 @@ function App(){
  const audio=useMemo(()=>inputs.filter(i=>/audio|mic|desktop|capture|browser|ffmpeg/i.test(i.inputKind||'')),[inputs]);
 
  return <div className="app">
-   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.3</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
+   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.4</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
    {notice&&<div className="notice">{notice}</div>}
    <nav>{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</nav>
 
@@ -221,6 +279,7 @@ function App(){
      {scene&&<div className="card editor-card"><div className="scene-head"><label className="name-edit">Nombre de la escena<input value={scene.name} onChange={e=>patchScene(scene.id,{name:e.target.value})}/></label><div className="row"><button onClick={()=>moveScene(scene.id,-1)}>← Mover</button><button onClick={()=>moveScene(scene.id,1)}>Mover →</button><button onClick={duplicateScene}>Duplicar escena</button><button className="danger" onClick={()=>removeScene(scene.id)}>Eliminar</button></div></div><MediaEditor scene={scene} patch={p=>patchScene(scene.id,p)} onFile={f=>setMedia(scene,f)}/><LayerEditor scene={scene} patch={p=>patchScene(scene.id,p)}/><div className="participants-toggle-row"><label className="switchline"><input type="checkbox" checked={!!scene.participantsEnabled} onChange={e=>patchScene(scene.id,{participantsEnabled:e.target.checked})}/><span>Participantes en esta escena</span><b>{scene.participantsEnabled?'ACTIVADOS':'DESACTIVADOS'}</b></label></div>{scene.participantsEnabled&&<ParticipantsEditor scene={scene} patch={p=>patchScene(scene.id,p)} onBackground={f=>setBackground(scene,f)} onMode={(guestId,mode)=>fetch('/api/program/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sceneId:scene.id,guestId,mode})}).catch(()=>{})}/>}</div>}
    </section>}
 
+   {tab==='Precarga'&&<PreloadPanel profile={profile} selectedScene={scene} say={say} auto={autoPreload} setAuto={setAutoPreload}/>}
    {tab==='Audio'&&<section><div className="card"><h2>Mezclador rápido de OBS</h2><p className="muted">Conecta WebSocket en Configuración. Esta función solo controla audio; no toca escenas de OBS.</p><div className="scene-grid">{audio.map(i=><button className="scene" key={i.inputName} disabled={!connected} onClick={()=>toggleMute(i.inputName)}>🎚 {i.inputName}</button>)}</div></div></section>}
    {tab==='Fuentes'&&<section><div className="card"><h2>Fuentes detectadas en OBS</h2><p className="muted">Solo lectura.</p><div className="source-list">{inputs.map(i=><div key={i.inputName}><b>{i.inputName}</b><span>{i.inputKind}</span></div>)}</div></div></section>}
    {tab==='Configuración'&&<section><div className="card settings"><h2>OBS WebSocket (opcional)</h2><p className="muted">Conexión directa desde este navegador a OBS. La dirección 127.0.0.1 solo funciona desde la misma PC donde está OBS; el control remoto del staff se configurará en un paso posterior.</p><label>Servidor<input value={host} onChange={e=>setHost(e.target.value)} placeholder="ws://127.0.0.1:4455"/></label><label>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><div className="row"><button className="primary" onClick={connectObs}>Conectar a OBS</button><span>{obsStatus}</span></div><hr/><h2>Fuente de navegador</h2><div className="output-info"><code>{outputUrl}</code><p className="muted">Ancho 1920 · Alto 1080</p></div></div></section>}
