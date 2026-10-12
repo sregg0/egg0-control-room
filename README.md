@@ -1,3 +1,9 @@
+# SREGGO Control Room V18.2 — Corte directo
+
+El cambio de escenas en `/output` es instantáneo: no hay fade, desvanecimiento, espera de precarga ni animaciones de transición. La escena publicada reemplaza directamente a la anterior.
+
+**Nota:** las fuentes externas (VDO.Ninja, videos y archivos remotos) pueden tardar en cargar aunque no exista una transición. Mantén OBS apuntando a `/output`.
+
 # SREGGO Control Room V18.1 — TV Output
 
 ## Qué cambia

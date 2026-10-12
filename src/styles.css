@@ -35,32 +35,4 @@
 /* V17 perfiles y pizarras (conserva los colores y disposición de V16) */
 .board-controls{border:1px solid #3b3040;border-radius:9px;padding:10px;margin:12px 0;background:#111017}.board-controls .row{margin:8px 0}.board-link{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.board-link code{word-break:break-all;font-size:10px;flex:1;color:#ff95c4}.board-link button{white-space:nowrap}.board-page{max-width:1250px;padding:24px;margin:auto}.board-toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin:16px 0}.board-toolbar label{min-width:100px;max-width:200px}.board-toolbar input[type=color]{padding:2px;height:38px;width:70px}.board-drawing{width:100%;aspect-ratio:16/9;background:white;touch-action:none;cursor:crosshair;border-radius:8px;overflow:hidden;user-select:none}.board-canvas{width:100%;height:100%;display:block;pointer-events:none}.persistent-board{position:absolute;overflow:hidden;background:white;pointer-events:none}.p-guest .board-canvas{background:#fff}.board-toolbar button{height:40px}
 
-/* V17 TV TAKE: a true full-frame dissolve. Old frame stays until new stage is mounted. */
-.tv-scene{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:#000}
-.tv-onair{z-index:1}
-.tv-incoming{z-index:2;opacity:0;pointer-events:none;transition:opacity var(--tv-duration,300ms) linear;will-change:opacity}
-.tv-incoming.tv-take{opacity:1}
-.tv-scene .persistent-current{position:absolute;inset:0}
-.tv-scene .persistent-vdo{transition:none!important}
-.tv-scene .persistent-vdo.active{opacity:1}
-
-/* Only one transition remains: full-scene 300ms dissolve. */
-.tv-incoming{transition:opacity 300ms linear!important}
-.persistent-visual,.program-layer{animation:none!important}
-.persistent-vdo{transition:none!important}
-
-/* V17 FIX: exactly one page-side crossfade. Retain active media nodes. */
-.tv-slot{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:#000;pointer-events:none;transition:none;contain:layout paint}
-.tv-slot.tv-target{transition:opacity 300ms linear!important;will-change:opacity}
-.tv-slot .persistent-current{position:absolute;inset:0}
-.tv-slot .persistent-vdo{transition:none!important}
-
-/* V18 /output: only the Web Animations API does the 300 ms dissolve. */
-.tv18-slot{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none;transition:none!important;animation:none!important;}
-.tv18-slot .persistent-current{position:absolute;inset:0;}
-.tv18-slot .persistent-vdo{transition:none!important;animation:none!important;}
-
-/* V18.1: output owns precisely one 300ms Web Animations dissolve. */
-.tv181-slot{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none;transition:none!important;animation:none!important}
-.tv181-slot .persistent-current{position:absolute;inset:0}
-.tv181-slot .persistent-vdo{transition:none!important;animation:none!important}
+/* V18.2: corte directo; no existen transiciones de escenas en /output. */

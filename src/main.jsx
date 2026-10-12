@@ -72,93 +72,33 @@ function ParticipantsOutput({scene,interactive=false}){
    {(scene.guests||[]).filter(g=>g.visible).map(g=><div className="p-guest" key={`${g.id}-${g.url}`} style={{left:`${g.x/19.2}%`,top:`${g.y/10.8}%`,width:`${g.w/19.2}%`,height:`${g.h/10.8}%`}}>{g.mode==='board'?<BoardViewer boardId={g.boardId}/>:g.url?<iframe src={normalizeVdo(g.url)} allow="autoplay; fullscreen; picture-in-picture" allowTransparency="true" loading="eager" title={g.name} style={{pointerEvents:interactive?'auto':'none'}}/>:null}</div>)}
  </div>;
 }
-// V18.1: ONE dissolve in /output. No extra CSS fades, fake preloading,
-// fixed delays, or remount of the incoming scene after TAKE.
+// V18.2: direct cut only. Output renders one active composition.
+// No transitions, staging, fades, readiness waits, or animated layers.
 function Output(){
- const [slots,setSlots]=useState([null,null]);
- const [onAir,setOnAir]=useState(0);
- const [transition,setTransition]=useState(null);
- const slotsRef=useRef([null,null]);
- const onAirRef=useRef(0);
+ const [scene,setScene]=useState(null);
  const versionRef=useRef(0);
- const pendingRef=useRef(null);
- const busyRef=useRef(false);
- const activeAnimation=useRef(null);
- const elements=useRef([null,null]);
- const incomingToken=useRef(0);
- const begin=payload=>{
-   const current=onAirRef.current;
-   if(!slotsRef.current[current]){
-     const updated=[...slotsRef.current];updated[current]=payload.scene;
-     slotsRef.current=updated;setSlots(updated);
-     return;
-   }
-   // Same visual composition: update in place, without flashing the entire screen.
-   if(JSON.stringify(slotsRef.current[current])===JSON.stringify(payload.scene))return;
-   busyRef.current=true;
-   const target=1-current;
-   const updated=[...slotsRef.current];updated[target]=payload.scene;
-   slotsRef.current=updated;setSlots(updated);
-   setTransition({target,from:current,version:payload.version});
- };
  const accept=payload=>{
    if(!payload?.scene)return;
    const version=Number(payload.version)||0;
-   if(version&&version<=versionRef.current)return;
+   if(version && version<=versionRef.current)return;
    if(version)versionRef.current=version;
-   // Keep only the latest TAKE if the operator changes scenes mid-transition.
-   if(busyRef.current){pendingRef.current=payload;return;}
-   begin(payload);
+   setScene(payload.scene);
  };
  useEffect(()=>{
-   if(!transition)return;
-   let cancelled=false;
-   const token=++incomingToken.current;
-   const {target,from}=transition;
-   const incoming=slotsRef.current[target];
-   const el=elements.current[target];
-   if(!el)return;
-   // The outgoing scene stays ON SCREEN while the incoming image is decoded.
-   // This is readiness checking, not a fixed artificial wait. Videos and
-   // cross-origin VDO.Ninja frames cannot report their first decoded frame here.
-   const prepare=async()=>{
-     const assets=[incoming?.asset,incoming?.background].filter(a=>a?.url&&!isVideo(a));
-     await Promise.all(assets.map(async a=>{
-       const image=new Image();image.src=a.url;
-       try{if(image.decode)await image.decode();else if(!image.complete)await new Promise(resolve=>{image.onload=resolve;image.onerror=resolve})}catch{}
-     }));
-     if(cancelled||token!==incomingToken.current)return;
-     const animation=el.animate([{opacity:0},{opacity:1}],{duration:300,easing:'linear',fill:'forwards'});
-     activeAnimation.current=animation;
-     animation.onfinish=()=>{
-       if(cancelled||token!==incomingToken.current||activeAnimation.current!==animation)return;
-       activeAnimation.current=null;
-       // React must own the final opacity. The incoming DOM is never rebuilt.
-       onAirRef.current=target;
-       const updated=[...slotsRef.current];updated[from]=null;
-       slotsRef.current=updated;
-       setOnAir(target);setSlots(updated);setTransition(null);
-       busyRef.current=false;
-       animation.cancel();
-       const next=pendingRef.current;pendingRef.current=null;
-       if(next)requestAnimationFrame(()=>begin(next));
-     };
-   };
-   prepare();
-   return()=>{cancelled=true;incomingToken.current++;const a=activeAnimation.current;if(a){activeAnimation.current=null;a.cancel()}};
- },[transition]);
- useEffect(()=>{
-   let stopped=false,fallback=null;
-   const refresh=async()=>{try{const r=await fetch('/api/program',{cache:'no-store'});if(r.ok&&!stopped)accept(await r.json())}catch{}};
+   let stopped=false;
+   let fallback=null;
+   const refresh=async()=>{try{
+     const r=await fetch('/api/program',{cache:'no-store'});
+     if(r.ok&&!stopped)accept(await r.json());
+   }catch{}};
+   refresh();
    const stream=new EventSource('/api/program/events');
    stream.addEventListener('program',e=>{if(stopped)return;try{accept(JSON.parse(e.data))}catch{}});
    stream.onerror=()=>{if(!fallback)fallback=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1500)};
-   return()=>{stopped=true;stream.close();if(fallback)clearInterval(fallback);activeAnimation.current?.cancel()};
+   return()=>{stopped=true;stream.close();if(fallback)clearInterval(fallback)};
  },[]);
  return <div className="program-root persistent-output">
-   {[0,1].map(i=><div key={i} ref={el=>elements.current[i]=el} className="tv181-slot" style={{zIndex:transition?.target===i?2:i===onAir?1:0,opacity:transition?.target===i?0:i===onAir?1:0}}>
-     {slots[i]&&<PersistentCurrentCanvas scenes={[]} scene={slots[i]} fadeMs={0}/>}
-   </div>)}
+   <PersistentCurrentCanvas scenes={[]} scene={scene} fadeMs={0}/>
  </div>;
 }
 function PersistentCurrentCanvas({scenes,scene,fadeMs}){
@@ -231,7 +171,6 @@ function App(){
  const [selected,setSelected]=useState('');
  const selectionReady=useRef(false), remoteSelection=useRef(false), lastSelectionVersion=useRef(0), lastSelectionEdit=useRef(0);
  const [tab,setTab]=useState('En vivo');
- const fadeMs=300;
  const [dirty,setDirty]=useState(false),[notice,setNotice]=useState(''),[sending,setSending]=useState(false),[liveName,setLiveName]=useState('—'),[bridgeOk,setBridgeOk]=useState(false);
  const [host,setHost]=useState(localStorage.getItem('obsHost')||'ws://127.0.0.1:4455');
  const [password,setPassword]=useState(localStorage.getItem('obsPassword')||'');
@@ -276,7 +215,7 @@ function App(){
  const addScene=(withParticipants=false)=>{const n=mediaScene(withParticipants?'NUEVA PARTICIPANTES':'NUEVA ESCENA',withParticipants);setScenes(v=>[...v,n]);choose(profile.id,n.id);setTab('Perfiles');setDirty(true)};
  const removeScene=id=>{if(scenes.length<=1)return say('Debe quedar al menos una escena');const next=scenes.filter(s=>s.id!==id);setScenes(next);choose(profile.id,next[0]?.id||'');setDirty(true)};
  const moveScene=(id,dir)=>setScenes(v=>{const i=v.findIndex(s=>s.id===id),j=i+dir;if(i<0||j<0||j>=v.length)return v;const c=[...v];[c[i],c[j]]=[c[j],c[i]];setDirty(true);return c});
- async function sendOnAir(s=scene){if(!s)return;setSending(true);try{const ver=Date.now();await publish({scene:JSON.parse(JSON.stringify(s)),fadeMs,version:ver});setBridgeOk(true);setLiveName(s.name);setDirty(false);say(`“${s.name}” está al aire`)}catch(e){setBridgeOk(false);say(e.message||'No se pudo enviar al aire')}finally{setSending(false)}}
+ async function sendOnAir(s=scene){if(!s)return;setSending(true);try{const ver=Date.now();await publish({scene:JSON.parse(JSON.stringify(s)),version:ver});setBridgeOk(true);setLiveName(s.name);setDirty(false);say(`“${s.name}” está al aire`)}catch(e){setBridgeOk(false);say(e.message||'No se pudo enviar al aire')}finally{setSending(false)}}
  async function setMedia(s,file){try{const a=await uploadFile(file);patchScene(s.id,{asset:a});say(`Archivo cargado: ${file.name}`)}catch(e){say(e.message)}}
  async function setBackground(s,file){try{const a=await uploadFile(file);patchScene(s.id,{background:a});say(`Fondo cargado: ${file.name}`)}catch(e){say(e.message)}}
  async function connectObs(){try{setObsStatus('Conectando…');await obs.connect(host,password||undefined);localStorage.setItem('obsHost',host);localStorage.setItem('obsPassword',password);setConnected(true);setObsStatus('Conectado');const il=await obs.call('GetInputList');setInputs(il.inputs||[]);setStreaming((await obs.call('GetStreamStatus')).outputActive);setRecording((await obs.call('GetRecordStatus')).outputActive);say('OBS conectado. Esta versión no crea ni cambia escenas de OBS.')}catch(e){setConnected(false);setObsStatus('Error');say(e?.message||'No se pudo conectar')}}
@@ -286,7 +225,7 @@ function App(){
  const audio=useMemo(()=>inputs.filter(i=>/audio|mic|desktop|capture|browser|ffmpeg/i.test(i.inputKind||'')),[inputs]);
 
  return <div className="app">
-   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.1</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
+   <header><div><div className="eyebrow">SREGGO • CONTROL ROOM V18.2</div><h1>Panel de Producción</h1></div><div className="status"><span className={connected?'dot on':'dot'}/>{connected?'OBS conectado':'OBS opcional'} <span className={bridgeOk?'bridge-ok':'bridge-bad'}>● Output {bridgeOk?'listo':'sin conexión'}</span> <span className="live-tag">AL AIRE: <b>{liveName}</b></span></div></header>
    {notice&&<div className="notice">{notice}</div>}
    <nav>{tabs.map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</nav>
 
@@ -294,7 +233,7 @@ function App(){
 
    {tab==='Perfiles'&&<section>
      <div className="card"><div className="title-row"><div><h2>Perfiles de producción</h2><p className="muted">Cada perfil tiene escenas y participantes independientes.</p></div><div className="row wrap"><button className="primary" onClick={addProfile}>+ Crear perfil</button><button onClick={renameProfile}>Renombrar</button><button onClick={duplicateProfile}>Duplicar</button><button className="danger" onClick={deleteProfile}>Eliminar</button></div></div><div className="scene-grid">{profiles.map(p=><button key={p.id} className={p.id===profile?.id?'scene current':'scene'} onClick={()=>choose(p.id,'')}>📁 {p.name}<small>{p.scenes.length} escenas</small></button>)}</div></div>
-     <div className="controlbar"><div><span className={dirty?'pending-pill':'pending-pill clean'}>{dirty?'CAMBIOS SIN PUBLICAR':'SIN CAMBIOS'}</span><span className="muted"> El preview cambia aquí, pero OBS no cambia hasta “Enviar al aire”.</span></div><div className="row wrap"><span className="muted">Desvanecimiento · 300 ms</span><button className="primary" disabled={sending||!scene} onClick={()=>sendOnAir(scene)}>{sending?'Enviando…':'Actualizar / Enviar al aire'}</button></div></div>
+     <div className="controlbar"><div><span className={dirty?'pending-pill':'pending-pill clean'}>{dirty?'CAMBIOS SIN PUBLICAR':'SIN CAMBIOS'}</span><span className="muted"> El preview cambia aquí, pero OBS no cambia hasta “Enviar al aire”.</span></div><div className="row wrap"><span className="muted">Corte directo · sin transición</span><button className="primary" disabled={sending||!scene} onClick={()=>sendOnAir(scene)}>{sending?'Enviando…':'Actualizar / Enviar al aire'}</button></div></div>
      <div className="scenes-layout"><div className="card scene-library"><div className="title-row"><h2>Escenas — {profile?.name}</h2><div className="row wrap"><button onClick={()=>addScene(false)}>+ Escena</button><button onClick={()=>addScene(true)}>+ Escena con participantes</button></div></div><div className="scene-grid">{scenes.map(s=><button key={s.id} className={s.id===scene?.id?'scene current':'scene'} onClick={()=>choose(profile.id,s.id)}><span className="scene-dot"/>{s.name}<small>{s.participantsEnabled?'Archivo + Participantes':'Archivo'}</small></button>)}</div></div>
        <div className="card preview-card"><div className="title-row"><h2>Preview de escena — 1920 × 1080</h2><span className="preview-name">{scene?.name}</span></div><Preview scene={scene} scenes={scenes}/></div>
      </div>
