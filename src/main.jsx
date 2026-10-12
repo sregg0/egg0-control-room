@@ -39,7 +39,12 @@ async function uploadFile(file){
  const r=await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
  const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d?.error||`Upload HTTP ${r.status}`);return {url:d.url,name:file.name,type:file.type||''};
 }
-async function publish(state){const r=await fetch(`/api/program?t=${Date.now()}`,{method:'POST',headers:{'Content-Type':'application/json','Cache-Control':'no-store'},cache:'no-store',body:JSON.stringify(state)});const d=await r.json().catch(()=>null);if(!r.ok||!d?.ok)throw new Error(d?.error||`No se pudo enviar al aire (HTTP ${r.status})`);const check=await fetch(`/api/program?t=${Date.now()}`,{cache:'no-store'});const saved=await check.json().catch(()=>null);if(!check.ok||Number(saved?.version)!==Number(state.version))throw new Error('El servidor recibió el cambio pero no pudo verificarlo');return d}
+async function publish(state){
+ const r=await fetch('/api/program',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(state)});
+ const d=await r.json().catch(()=>null);
+ if(!r.ok||!d?.ok)throw new Error(d?.error||`No se pudo enviar al aire (HTTP ${r.status})`);
+ return d;
+}
 
 function isVideo(asset){return !!asset&&(((asset.type||'').startsWith('video/'))||/\.(mp4|webm|mov|m4v)$/i.test(asset.url||''));}
 
@@ -72,7 +77,6 @@ function ParticipantsOutput({scene,interactive=false}){
 function Output(){
  const [program,setProgram]=useState({scene:null,fadeMs:300,version:0});
  const [incoming,setIncoming]=useState(null);
- const [preloadScenes,setPreloadScenes]=useState([]);
  const [fadeStarted,setFadeStarted]=useState(false);
  const programRef=useRef(program),incomingRef=useRef(null),lastVersion=useRef(-1);
  const timer=useRef(null),commitTimer=useRef(null);
@@ -88,22 +92,26 @@ function Output(){
    incomingRefSet(next);setFadeStarted(false);
    // Give React one short render window to mount the incoming canvas.
    // Never add a fixed 1.4-second camera wait to the TAKE.
-   const wait=40;
+   const wait=20;
    timer.current=setTimeout(()=>{
      if(incomingRef.current!==next)return;
      setFadeStarted(true);
-     const duration=clamp(next.fadeMs??300,0,3000);
+     const duration=300;
      commitTimer.current=setTimeout(()=>{programRef.current=next;setProgram(next);incomingRefSet(null);setFadeStarted(false)},duration+40);
    },wait);
  };
- useEffect(()=>{let stopped=false,pollProgram,pollPreload;
-  const tickProgram=async()=>{try{const r=await fetch(`/api/program?t=${Date.now()}`,{cache:'no-store'});if(r.ok){const d=await r.json();if(!stopped)apply(d)}}catch{};if(!stopped)pollProgram=setTimeout(tickProgram,250)};
-  const tickPreload=async()=>{try{const r=await fetch(`/api/preload?t=${Date.now()}`,{cache:'no-store'});if(r.ok){const d=await r.json();if(!stopped&&Array.isArray(d?.scenes))setPreloadScenes(d.scenes)}}catch{};if(!stopped)pollPreload=setTimeout(tickPreload,700)};
-  tickProgram();tickPreload();return()=>{stopped=true;clearTimeout(pollProgram);clearTimeout(pollPreload);clearTimeout(timer.current);clearTimeout(commitTimer.current)}
+ useEffect(()=>{
+  let stopped=false, fallback;
+  const refresh=async()=>{try{const r=await fetch('/api/program',{cache:'no-store'});if(r.ok&&!stopped)apply(await r.json())}catch{}};
+  const stream=new EventSource('/api/program/events');
+  stream.addEventListener('program',e=>{if(stopped)return;try{apply(JSON.parse(e.data))}catch{}});
+  // Only poll when the real-time channel is unavailable.
+  stream.onerror=()=>{if(!fallback)fallback=setInterval(()=>{if(stream.readyState!==EventSource.OPEN)refresh()},1500)};
+  refresh();
+  return()=>{stopped=true;stream.close();clearInterval(fallback);clearTimeout(timer.current);clearTimeout(commitTimer.current)};
  },[]);
- const duration=clamp(incoming?.fadeMs??300,0,3000);
+ const duration=300;
  return <div className="program-root persistent-output">
-   <MediaPreloader scenes={preloadScenes}/>
    <div className="tv-scene tv-onair"><PersistentCurrentCanvas scenes={[]} scene={program?.scene} fadeMs={0}/></div>
    {incoming?.scene&&<div className={`tv-scene tv-incoming ${fadeStarted?'tv-take':''}`} style={{'--tv-duration':`${duration}ms`}}><PersistentCurrentCanvas scenes={[]} scene={incoming.scene} fadeMs={0}/></div>}
  </div>;
@@ -124,10 +132,6 @@ function SceneVisualOnly({scene}){
  const layers=Array.isArray(scene.layers)?scene.layers:['background','media','participants'];
  const render=(key,index)=>{const z=index+1;if(key==='background')return scene.background?.url?<img key="bg" className="layer-bg" src={scene.background.url} alt="" style={{zIndex:z,opacity:clamp(scene.bgOpacity??35,0,100)/100}}/>:null;if(key==='media'){const a=scene.asset;return a?(isVideo(a)?<video key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:z}} src={a.url} autoPlay playsInline loop={scene.loop!==false} muted={scene.muted!==false}/>:<img key={a.url} className={`media ${scene.fit||'cover'}`} style={{zIndex:z}} src={a.url} alt=""/>):null}return null};
  return <div className="scene-composite">{layers.map(render)}</div>;
-}
-function MediaPreloader({scenes}){
- const assets=[];const seen=new Set();for(const s of scenes||[]){for(const a of [s?.asset,s?.background])if(a?.url&&!seen.has(a.url)){seen.add(a.url);assets.push(a)}}
- return <div className="preload-cache" aria-hidden="true">{assets.map(a=>isVideo(a)?<video key={a.url} src={a.url} preload="auto" muted playsInline/>:<img key={a.url} src={a.url} alt=""/>)}</div>;
 }
 function PersistentVdoPool({scenes,scene,fadeMs}){
  const pool=useMemo(()=>{const map=new Map();for(const s of [...(scenes||[]),...(scene?[scene]:[])]){for(const g of s?.guests||[]){const url=normalizeVdo(g?.url);if(url&&!map.has(url))map.set(url,{url,name:g?.name||'Invitado'})}}return [...map.values()]},[scenes,scene]);
@@ -182,7 +186,7 @@ function App(){
  const [selected,setSelected]=useState('');
  const selectionReady=useRef(false), remoteSelection=useRef(false), lastSelectionVersion=useRef(0), lastSelectionEdit=useRef(0);
  const [tab,setTab]=useState('En vivo');
- const [fadeMs,setFadeMs]=useState(()=>Number(localStorage.getItem('v17FadeMs')||300));
+ const fadeMs=300;
  const [dirty,setDirty]=useState(false),[notice,setNotice]=useState(''),[sending,setSending]=useState(false),[liveName,setLiveName]=useState('—'),[bridgeOk,setBridgeOk]=useState(false);
  const [host,setHost]=useState(localStorage.getItem('obsHost')||'ws://127.0.0.1:4455');
  const [password,setPassword]=useState(localStorage.getItem('obsPassword')||'');
@@ -214,8 +218,6 @@ function App(){
  useEffect(()=>localStorage.setItem('v17Profiles',JSON.stringify(profiles)),[profiles]);
  useEffect(()=>{if(fromRemote.current){fromRemote.current=false;return}if(!studioReady||!profiles.length)return;const t=setTimeout(()=>fetch('/api/studio',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({profiles,version:Date.now()})}).catch(()=>{}),450);return()=>clearTimeout(t)},[profiles]);
  useEffect(()=>{let stopped=false;const pull=async()=>{try{const r=await fetch('/api/studio',{cache:'no-store'});const d=await r.json();if(stopped)return;setStudioReady(true);if(!Array.isArray(d.profiles)||!d.profiles.length)return;if(d.version>lastRemoteVersion.current&&Date.now()-lastLocalEdit.current>2500){lastRemoteVersion.current=d.version;fromRemote.current=true;setProfiles(d.profiles.map(p=>({...p,scenes:(p.scenes||[]).map(normalizeScene)})))}}catch{if(!stopped)setStudioReady(true)}};pull();const t=setInterval(pull,2200);return()=>{stopped=true;clearInterval(t)}},[]);
- useEffect(()=>{const t=setTimeout(()=>{fetch('/api/preload',{method:'POST',headers:{'Content-Type':'application/json','Cache-Control':'no-store'},body:JSON.stringify({scenes,version:Date.now()})}).catch(()=>{})},180);return()=>clearTimeout(t)},[scenes]);
- useEffect(()=>localStorage.setItem('v17FadeMs',String(fadeMs)),[fadeMs]);
  useEffect(()=>{fetch('/api/health',{cache:'no-store'}).then(r=>r.json()).then(d=>setBridgeOk(!!d?.ok)).catch(()=>setBridgeOk(false));fetch('/api/program',{cache:'no-store'}).then(r=>r.json()).then(d=>setLiveName(d?.scene?.name||'—')).catch(()=>{})},[]);
  useEffect(()=>{const close=()=>{setConnected(false);setObsStatus('Desconectado')};obs.on('ConnectionClosed',close);return()=>obs.removeAllListeners()},[]);
  const say=m=>{setNotice(m);setTimeout(()=>setNotice(''),3200)};
@@ -247,7 +249,7 @@ function App(){
 
    {tab==='Perfiles'&&<section>
      <div className="card"><div className="title-row"><div><h2>Perfiles de producción</h2><p className="muted">Cada perfil tiene escenas y participantes independientes.</p></div><div className="row wrap"><button className="primary" onClick={addProfile}>+ Crear perfil</button><button onClick={renameProfile}>Renombrar</button><button onClick={duplicateProfile}>Duplicar</button><button className="danger" onClick={deleteProfile}>Eliminar</button></div></div><div className="scene-grid">{profiles.map(p=><button key={p.id} className={p.id===profile?.id?'scene current':'scene'} onClick={()=>choose(p.id,'')}>📁 {p.name}<small>{p.scenes.length} escenas</small></button>)}</div></div>
-     <div className="controlbar"><div><span className={dirty?'pending-pill':'pending-pill clean'}>{dirty?'CAMBIOS SIN PUBLICAR':'SIN CAMBIOS'}</span><span className="muted"> El preview cambia aquí, pero OBS no cambia hasta “Enviar al aire”.</span></div><div className="row wrap"><label className="inline-control">Fade <input type="number" min="0" max="2000" step="50" value={fadeMs} onChange={e=>setFadeMs(clamp(e.target.value,0,2000))}/> ms</label><button className="primary" disabled={sending||!scene} onClick={()=>sendOnAir(scene)}>{sending?'Enviando…':'Actualizar / Enviar al aire'}</button></div></div>
+     <div className="controlbar"><div><span className={dirty?'pending-pill':'pending-pill clean'}>{dirty?'CAMBIOS SIN PUBLICAR':'SIN CAMBIOS'}</span><span className="muted"> El preview cambia aquí, pero OBS no cambia hasta “Enviar al aire”.</span></div><div className="row wrap"><span className="muted">Desvanecimiento · 300 ms</span><button className="primary" disabled={sending||!scene} onClick={()=>sendOnAir(scene)}>{sending?'Enviando…':'Actualizar / Enviar al aire'}</button></div></div>
      <div className="scenes-layout"><div className="card scene-library"><div className="title-row"><h2>Escenas — {profile?.name}</h2><div className="row wrap"><button onClick={()=>addScene(false)}>+ Escena</button><button onClick={()=>addScene(true)}>+ Escena con participantes</button></div></div><div className="scene-grid">{scenes.map(s=><button key={s.id} className={s.id===scene?.id?'scene current':'scene'} onClick={()=>choose(profile.id,s.id)}><span className="scene-dot"/>{s.name}<small>{s.participantsEnabled?'Archivo + Participantes':'Archivo'}</small></button>)}</div></div>
        <div className="card preview-card"><div className="title-row"><h2>Preview de escena — 1920 × 1080</h2><span className="preview-name">{scene?.name}</span></div><Preview scene={scene} scenes={scenes}/></div>
      </div>

@@ -19,6 +19,14 @@ let boards=readJSON(boardsFile,{});
 // Real-time ephemeral pen strokes; completed strokes still persist through PUT.
 const liveBoards = new Map();
 const boardStreams = new Map();
+const programClients = new Set();
+function broadcastProgram() {
+  const message = `event: program\ndata: ${JSON.stringify(program)}\n\n`;
+  for (const res of programClients) {
+    try { res.write(message); } catch { programClients.delete(res); }
+  }
+}
+
 function broadcastBoard(id, event) {
   const clients = boardStreams.get(id);
   if (!clients) return;
@@ -30,7 +38,6 @@ function bodyJSON(req,res,cb,max=2*1024*1024){let body='',large=false;req.setEnc
 function findBoard(id){for(const p of studio.profiles||[])for(const s of p.scenes||[])for(const g of s.guests||[])if(g.boardId===id)return g;return null}
 const DEFAULT = { scene: null, fadeMs: 300, version: 0 };
 let program = { ...DEFAULT };
-let preload = { scenes: [], version: 0 };
 try {
   const saved = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   if (saved && typeof saved === 'object') program = { ...DEFAULT, ...saved };
@@ -135,37 +142,32 @@ const server = http.createServer((req, res) => {
     return json(res,405,{error:'Método no permitido'});
   }
 
-  if (pathname === '/api/health') return json(res, 200, { ok:true, version:17, mode:'persistent-output', programVersion:program.version || 0, preloadVersion:preload.version || 0 });
+  if (pathname === '/api/health') return json(res, 200, { ok:true, version:17, mode:'persistent-output', programVersion:program.version || 0 });
 
-
-  if (pathname === '/api/preload' && req.method === 'GET') {
-    return json(res, 200, preload);
-  }
-
-  if (pathname === '/api/preload' && req.method === 'POST') {
-    let body = '';
-    req.setEncoding('utf8');
-    req.on('data', chunk => { body += chunk; if (body.length > 12 * 1024 * 1024) body = ''; });
-    req.on('end', () => {
-      try {
-        const next = JSON.parse(body || '{}');
-        preload = { scenes: Array.isArray(next.scenes) ? next.scenes : [], version: Number(next.version) || Date.now() };
-        return json(res, 200, { ok:true, version:preload.version, count:preload.scenes.length });
-      } catch (e) {
-        return json(res, 400, { ok:false, error:e?.message || 'Preload inválido' });
-      }
-    });
-    return;
-  }
 
   if(pathname==='/api/program/mode'&&req.method==='POST')return bodyJSON(req,res,next=>{
     if(!['camera','board'].includes(next.mode))return json(res,400,{error:'Modo inválido'});
     if(program.scene?.id!==next.sceneId)return json(res,200,{ok:true,updated:false});
     const guest=(program.scene.guests||[]).find(g=>String(g.id)===String(next.guestId));
     if(!guest)return json(res,404,{error:'Participante no encontrado'});
-    guest.mode=next.mode;program.version=Date.now();saveJSON(stateFile,program);
+    guest.mode=next.mode;program.version=Date.now();saveJSON(stateFile,program);broadcastProgram();
     return json(res,200,{ok:true,updated:true,version:program.version});
   });
+
+  // Persistent push channel: no 250ms polling delay between a TAKE and /output.
+  if (pathname === '/api/program/events' && req.method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    res.write(`event: program\ndata: ${JSON.stringify(program)}\n\n`);
+    programClients.add(res);
+    const heartbeat = setInterval(() => { try { res.write(': keepalive\n\n'); } catch {} }, 15000);
+    req.on('close', () => { clearInterval(heartbeat); programClients.delete(res); });
+    return;
+  }
 
   if (pathname === '/api/program' && req.method === 'GET') {
     return json(res, 200, program);
@@ -187,12 +189,13 @@ const server = http.createServer((req, res) => {
         if (!next || typeof next !== 'object') throw new Error('Estado inválido');
         program = {
           scene: next.scene ?? null,
-          fadeMs: Number.isFinite(Number(next.fadeMs)) ? Math.max(0, Math.min(3000, Number(next.fadeMs))) : 300,
+          fadeMs: 300,
           version: Number(next.version) || Date.now()
         };
         // Persistir es útil, pero NUNCA debe impedir mandar al aire.
         try { fs.writeFileSync(stateFile, JSON.stringify(program)); }
         catch (e) { console.warn('[V17] No se pudo guardar .program-state.json:', e.message); }
+        broadcastProgram();
         console.log(`[V17] AL AIRE -> ${program.scene?.name || 'SIN ESCENA'} | version ${program.version}`);
         return json(res, 200, { ok:true, version:program.version, sceneName:program.scene?.name || null });
       } catch (e) {
