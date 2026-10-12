@@ -54,3 +54,8 @@
 .tv-slot.tv-target{transition:opacity 300ms linear!important;will-change:opacity}
 .tv-slot .persistent-current{position:absolute;inset:0}
 .tv-slot .persistent-vdo{transition:none!important}
+
+/* V18 /output: only the Web Animations API does the 300 ms dissolve. */
+.tv18-slot{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none;transition:none!important;animation:none!important;}
+.tv18-slot .persistent-current{position:absolute;inset:0;}
+.tv18-slot .persistent-vdo{transition:none!important;animation:none!important;}
